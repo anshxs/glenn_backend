@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     }
 
     // Check if user can withdraw
-    if (!wallet.can_withdraw) {
+    if (!wallet.allow_withdrawals) {
       return NextResponse.json(
         { error: wallet.fraud_reason || 'Withdrawals are disabled for this account' },
         { status: 403 }
