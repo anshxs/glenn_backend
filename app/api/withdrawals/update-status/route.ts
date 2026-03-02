@@ -91,8 +91,8 @@ export async function POST(request: NextRequest) {
     }
 
     if (adminNotes) {
-      updateData.metadata = {
-        ...transaction.metadata,
+      updateData.payment_metadata = {
+        ...(transaction.payment_metadata || {}),
         admin_notes: adminNotes,
         status_updated_at: new Date().toISOString(),
       };

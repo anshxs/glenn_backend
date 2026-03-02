@@ -123,7 +123,7 @@ export async function POST(request: NextRequest) {
         withdrawal_status: 'PENDING',
         withdrawal_account_details: accountDetails || {},
         expected_payout_date: expectedPayoutDate.toISOString(),
-        metadata: {
+        payment_metadata: {
           withdrawal_method: withdrawalMethod,
           platform_fee: platformFee,
           net_amount: withdrawAmount,
