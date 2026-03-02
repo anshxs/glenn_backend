@@ -123,13 +123,13 @@ export async function POST(request: NextRequest) {
         withdrawal_status: 'PENDING',
         withdrawal_account_details: accountDetails || {},
         expected_payout_date: expectedPayoutDate.toISOString(),
-        description: `${withdrawalMethod} withdrawal of ₹${withdrawAmount}`,
         metadata: {
           withdrawal_method: withdrawalMethod,
           platform_fee: platformFee,
           net_amount: withdrawAmount,
           total_deduction: totalDeduction,
           requested_at: new Date().toISOString(),
+          description: `${withdrawalMethod} withdrawal of ₹${withdrawAmount}`,
         },
       })
       .select()
