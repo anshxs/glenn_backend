@@ -100,7 +100,7 @@ Update `BACKEND_URL` in `glenn/.env` with your deployed backend URL.
 1. Run the Flutter app
 2. Navigate to **Wallet Screen**
 3. Click **"Add Money"** button
-4. Enter amount (₹100 works well for testing)
+4. Enter amount (100 works well for testing)
 5. Click **"Enter"**
 6. Razorpay payment dialog opens
 7. Use test card details
@@ -121,7 +121,7 @@ Update `BACKEND_URL` in `glenn/.env` with your deployed backend URL.
 ## 🔒 Security Features
 
 ✅ Payment signature verification
-✅ Amount validation (₹10 min, ₹50,000 max)
+✅ Amount validation (10 min, 50,000 max)
 ✅ Wallet deposit restrictions checked
 ✅ Optimistic locking prevents race conditions
 ✅ Auto-cancellation of stale payments (30 min timeout)
@@ -192,7 +192,7 @@ Before going live:
 
 ## 💡 Features
 
-✨ Clean UI with quick amount buttons (₹100, ₹500, ₹1000, ₹2000, ₹5000)
+✨ Clean UI with quick amount buttons (100, 500, 1000, 2000, 5000)
 ✨ Real-time payment verification
 ✨ Automatic wallet balance updates
 ✨ Loading states and error handling

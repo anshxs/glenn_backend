@@ -1,0 +1,190 @@
+import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+export async function POST(request: NextRequest) {
+  try {
+    const body = await request.json();
+    const { userId, amount, withdrawalMethod, accountDetails } = body;
+
+    // Validate required fields
+    if (!userId || !amount || !withdrawalMethod) {
+      return NextResponse.json(
+        { error: 'Missing required fields: userId, amount, withdrawalMethod' },
+        { status: 400 }
+      );
+    }
+
+    // Validate withdrawal method
+    const validMethods = ['UPI', 'BANK', 'GIFTCARD'];
+    if (!validMethods.includes(withdrawalMethod)) {
+      return NextResponse.json(
+        { error: 'Invalid withdrawal method. Must be UPI, BANK, or GIFTCARD' },
+        { status: 400 }
+      );
+    }
+
+    // Validate amount
+    const withdrawAmount = parseFloat(amount);
+    if (isNaN(withdrawAmount) || withdrawAmount < 100) {
+      return NextResponse.json(
+        { error: 'Invalid amount. Minimum withdrawal is ₹100' },
+        { status: 400 }
+      );
+    }
+
+    if (withdrawAmount > 50000) {
+      return NextResponse.json(
+        { error: 'Invalid amount. Maximum withdrawal is ₹50,000' },
+        { status: 400 }
+      );
+    }
+
+    // Calculate platform fee based on withdrawal method
+    let platformFee = 0;
+    switch (withdrawalMethod) {
+      case 'UPI':
+        platformFee = 0.5;
+        break;
+      case 'BANK':
+      case 'GIFTCARD':
+        platformFee = 1.0;
+        break;
+    }
+
+    const totalDeduction = withdrawAmount + platformFee;
+
+    // Get user's wallet
+    const { data: wallet, error: walletError } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .single();
+
+    if (walletError) {
+      console.error('Wallet fetch error:', walletError);
+      return NextResponse.json(
+        { error: 'Failed to fetch wallet' },
+        { status: 500 }
+      );
+    }
+
+    if (!wallet) {
+      return NextResponse.json(
+        { error: 'Wallet not found' },
+        { status: 404 }
+      );
+    }
+
+    // Check if user can withdraw
+    if (!wallet.can_withdraw) {
+      return NextResponse.json(
+        { error: wallet.fraud_reason || 'Withdrawals are disabled for this account' },
+        { status: 403 }
+      );
+    }
+
+    // Check sufficient balance
+    if (wallet.balance < totalDeduction) {
+      return NextResponse.json(
+        { error: `Insufficient balance. Required: ₹${totalDeduction.toFixed(2)} (including ₹${platformFee} fee)` },
+        { status: 400 }
+      );
+    }
+
+    // Calculate expected payout date (1 working day from now)
+    const expectedPayoutDate = new Date();
+    expectedPayoutDate.setDate(expectedPayoutDate.getDate() + 1);
+    // If it's Friday, Saturday, or Sunday, add extra days
+    const dayOfWeek = expectedPayoutDate.getDay();
+    if (dayOfWeek === 6) { // Saturday
+      expectedPayoutDate.setDate(expectedPayoutDate.getDate() + 2);
+    } else if (dayOfWeek === 0) { // Sunday
+      expectedPayoutDate.setDate(expectedPayoutDate.getDate() + 1);
+    }
+
+    // Create withdrawal transaction
+    const { data: transaction, error: txError } = await supabase
+      .from('transactions')
+      .insert({
+        user_id: userId,
+        wallet_id: wallet.id,
+        amount: -withdrawAmount, // Negative for withdrawal
+        transaction_type: 'WITHDRAWAL',
+        payment_status: 'pending',
+        old_balance: wallet.balance,
+        new_balance: wallet.balance - totalDeduction,
+        platform_fee: platformFee,
+        withdrawal_method: withdrawalMethod,
+        withdrawal_status: 'PENDING',
+        withdrawal_account_details: accountDetails || {},
+        expected_payout_date: expectedPayoutDate.toISOString(),
+        description: `${withdrawalMethod} withdrawal of ₹${withdrawAmount}`,
+        metadata: {
+          withdrawal_method: withdrawalMethod,
+          platform_fee: platformFee,
+          net_amount: withdrawAmount,
+          total_deduction: totalDeduction,
+          requested_at: new Date().toISOString(),
+        },
+      })
+      .select()
+      .single();
+
+    if (txError) {
+      console.error('Transaction creation error:', txError);
+      return NextResponse.json(
+        { error: 'Failed to create withdrawal transaction' },
+        { status: 500 }
+      );
+    }
+
+    // Update wallet balance
+    const { error: updateError } = await supabase
+      .from('wallets')
+      .update({
+        balance: wallet.balance - totalDeduction,
+        updated_at: new Date().toISOString(),
+      })
+      .eq('id', wallet.id);
+
+    if (updateError) {
+      console.error('Wallet update error:', updateError);
+      // Rollback transaction
+      await supabase
+        .from('transactions')
+        .delete()
+        .eq('id', transaction.id);
+      
+      return NextResponse.json(
+        { error: 'Failed to update wallet balance' },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({
+      success: true,
+      transaction: {
+        id: transaction.id,
+        amount: withdrawAmount,
+        platformFee,
+        totalDeduction,
+        withdrawalMethod,
+        expectedPayoutDate: expectedPayoutDate.toISOString(),
+        status: 'PENDING',
+      },
+      message: `Withdrawal request submitted successfully. You will receive ₹${withdrawAmount} within 1 working day.`,
+    });
+
+  } catch (error) {
+    console.error('Withdrawal creation error:', error);
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Internal server error' },
+      { status: 500 }
+    );
+  }
+}

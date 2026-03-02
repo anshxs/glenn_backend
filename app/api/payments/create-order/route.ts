@@ -44,18 +44,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Validate minimum amount (e.g., ₹10)
+    // Validate minimum amount (e.g., 10)
     if (amount < 10) {
       return NextResponse.json(
-        { error: 'Minimum amount is ₹10' },
+        { error: 'Minimum amount is 10' },
         { status: 400 }
       );
     }
 
-    // Validate maximum amount (e.g., ₹50,000)
+    // Validate maximum amount (e.g., 50,000)
     if (amount > 50000) {
       return NextResponse.json(
-        { error: 'Maximum amount is ₹50,000' },
+        { error: 'Maximum amount is 50,000' },
         { status: 400 }
       );
     }
