@@ -96,7 +96,7 @@ curl -X POST http://localhost:3000/api/participate \
 4. **Validates slots** based on team type (solo/duo/squad)
 5. **Checks wallet balance** is sufficient
 6. **Deducts fee** from wallet
-7. **Creates transaction** (type: TOURNAMENT_FEE_PAY)
+7. **Creates transaction** (type: TOURNAMENT_ENTRY)
 8. **Registers participant** in tournament
 9. **Updates slots** remaining
 10. **Increments** `tournmentsplayed` counter

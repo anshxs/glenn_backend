@@ -153,7 +153,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 6. Check if tournament has already started
+    // 6. Check if registration is allowed for this tournament
+    if (tournament.registration_allowed === false) {
+      return NextResponse.json(
+        { error: 'Registration closed', message: 'Registration is not allowed for this tournament' },
+        { status: 400 }
+      );
+    }
+
+    // 7. Check if tournament has already started
     const tournamentDateTime = new Date(tournament.tournament_datetime);
     const now = new Date();
     if (tournamentDateTime <= now) {
@@ -163,11 +171,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 7. Calculate team size and required slots
+    // 8. Calculate team size and required slots
     const teamSize = team_members ? getTeamSize(team_members) : 1;
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
-    // 8. Check if enough slots are available
+    // 9. Check if enough slots are available
     if (tournament.slotsleft < requiredSlots) {
       return NextResponse.json(
         { error: 'Insufficient slots', message: `Not enough slots available. Required: ${requiredSlots}, Available: ${tournament.slotsleft}` },
@@ -175,9 +183,9 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 9. Team size validation removed - any team size allowed
+    // 10. Team size validation removed - any team size allowed
 
-    // 10. Check if user is already registered for this tournament
+    // 11. Check if user is already registered for this tournament
     const { data: existingParticipant } = await supabaseAdmin
       .from('tournament_participants')
       .select('id')
@@ -192,7 +200,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 11. Fetch user's wallet
+    // 12. Fetch user's wallet
     const { data: wallet, error: walletError } = await supabaseAdmin
       .from('wallets')
       .select('*')
@@ -206,7 +214,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 12. Check if user has sufficient balance
+    // 13. Check if user has sufficient balance
     if (wallet.balance < amount) {
       return NextResponse.json(
         { 
@@ -217,7 +225,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 13. Begin transaction - Deduct from wallet
+    // 14. Begin transaction - Deduct from wallet
     const oldBalance = wallet.balance;
     const newBalance = oldBalance - amount;
 
@@ -234,14 +242,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 14. Create transaction record
+    // 15. Create transaction record
     const { data: transaction, error: transactionError } = await supabaseAdmin
       .from('transactions')
       .insert({
         user_id: user_id,
         wallet_id: wallet.id,
         amount: -amount, // Negative because it's a deduction
-        transaction_type: 'TOURNAMENT_FEE_PAY',
+        transaction_type: 'TOURNAMENT_ENTRY',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
         new_balance: newBalance
@@ -263,7 +271,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 15. Get next slot number for this tournament
+    // 16. Get next slot number for this tournament
     const { data: maxSlotData } = await supabaseAdmin
       .from('tournament_participants')
       .select('slot_number')
@@ -274,7 +282,7 @@ export async function POST(request: NextRequest) {
 
     const nextSlotNumber = maxSlotData?.slot_number ? maxSlotData.slot_number + 1 : 1;
 
-    // 16. Add participant to tournament
+    // 17. Add participant to tournament
     const { data: participant, error: participantError } = await supabaseAdmin
       .from('tournament_participants')
       .insert({
@@ -308,7 +316,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 16. Update tournament slots (this should be handled by trigger, but we'll do it manually too)
+    // 18. Update tournament slots (this should be handled by trigger, but we'll do it manually too)
     const { error: slotUpdateError } = await supabaseAdmin
       .from('tournaments')
       .update({ slotsleft: tournament.slotsleft - requiredSlots })
@@ -319,7 +327,7 @@ export async function POST(request: NextRequest) {
       // Don't rollback for this, as triggers might handle it
     }
 
-    // 17. Increment tournaments played in sensitive_userdata
+    // 19. Increment tournaments played in sensitive_userdata
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('sensitive_userdata')
       .select('tournmentsplayed')
@@ -340,7 +348,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 18. Get user's OneSignal player ID and send notification
+    // 20. Get user's OneSignal player ID and send notification
     const { data: userNotifications } = await supabaseAdmin
       .from('notifications')
       .select('onesignal_player_id, is_notifications_enabled')

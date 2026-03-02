@@ -15,6 +15,11 @@ export interface Tournament {
   slotsleft: number;
   entryfee: number;
   tournament_datetime: string;
+  registration_allowed: boolean;
+  organiser_id?: string;
+  organiser_name?: string;
+  organiser_contact?: string;
+  organiser_commission: number;
 }
 
 export interface Wallet {

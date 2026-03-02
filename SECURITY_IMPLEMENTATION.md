@@ -440,7 +440,7 @@ export async function POST(request: NextRequest) {
         user_id: user_id,
         wallet_id: wallet.id,
         amount: -amount,
-        transaction_type: 'TOURNAMENT_FEE_PAY',
+        transaction_type: 'TOURNAMENT_ENTRY',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
         new_balance: newBalance

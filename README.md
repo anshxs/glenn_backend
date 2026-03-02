@@ -127,7 +127,7 @@ The endpoint performs the following operations:
 2. Validates user and tournament data
 3. Checks wallet balance
 4. Deducts tournament fee from wallet
-5. Creates transaction record (type: TOURNAMENT_FEE_PAY)
+5. Creates transaction record (type: TOURNAMENT_ENTRY)
 6. Adds participant to tournament
 7. Updates tournament slots
 8. Increments `tournmentsplayed` in `sensitive_userdata`

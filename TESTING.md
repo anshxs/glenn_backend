@@ -185,7 +185,7 @@ Expected response:
 After successful registration, verify in Supabase:
 
 1. **tournament_participants** table - should have new entry
-2. **transactions** table - should have TOURNAMENT_FEE_PAY transaction
+2. **transactions** table - should have TOURNAMENT_ENTRY transaction
 3. **wallets** table - balance should be reduced
 4. **sensitive_userdata** table - `tournmentsplayed` should be incremented
 5. **tournaments** table - `slotsleft` should be reduced
