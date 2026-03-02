@@ -2,19 +2,19 @@ import { NextRequest, NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Supabase with service role
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
-
 export async function POST(req: NextRequest) {
+  // Initialize Supabase with service role inside request handler
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+
   try {
     // Get webhook signature from headers
     const webhookSignature = req.headers.get('x-razorpay-signature');
@@ -51,19 +51,19 @@ export async function POST(req: NextRequest) {
     // Handle different webhook events
     switch (event.event) {
       case 'payment.captured':
-        await handlePaymentCaptured(event.payload.payment.entity);
+        await handlePaymentCaptured(event.payload.payment.entity, supabase);
         break;
 
       case 'payment.failed':
-        await handlePaymentFailed(event.payload.payment.entity);
+        await handlePaymentFailed(event.payload.payment.entity, supabase);
         break;
 
       case 'payment.authorized':
-        await handlePaymentAuthorized(event.payload.payment.entity);
+        await handlePaymentAuthorized(event.payload.payment.entity, supabase);
         break;
 
       case 'order.paid':
-        await handleOrderPaid(event.payload.order.entity);
+        await handleOrderPaid(event.payload.order.entity, supabase);
         break;
 
       default:
@@ -81,7 +81,7 @@ export async function POST(req: NextRequest) {
   }
 }
 
-async function handlePaymentCaptured(payment: any) {
+async function handlePaymentCaptured(payment: any, supabase: any) {
   console.log('Payment captured:', payment.id);
 
   // Find transaction by order_id
@@ -128,7 +128,7 @@ async function handlePaymentCaptured(payment: any) {
   console.log('Updated transaction with webhook data:', transaction.id);
 }
 
-async function handlePaymentFailed(payment: any) {
+async function handlePaymentFailed(payment: any, supabase: any) {
   console.log('Payment failed:', payment.id);
 
   // Find transaction by order_id
@@ -173,7 +173,7 @@ async function handlePaymentFailed(payment: any) {
   // Optional: Send notification to user about failed payment
 }
 
-async function handlePaymentAuthorized(payment: any) {
+async function handlePaymentAuthorized(payment: any, supabase: any) {
   console.log('Payment authorized:', payment.id);
 
   // Similar to captured, but payment is only authorized, not captured yet
@@ -204,7 +204,7 @@ async function handlePaymentAuthorized(payment: any) {
     .eq('id', transaction.id);
 }
 
-async function handleOrderPaid(order: any) {
+async function handleOrderPaid(order: any, supabase: any) {
   console.log('Order paid:', order.id);
 
   // Find transaction by order_id

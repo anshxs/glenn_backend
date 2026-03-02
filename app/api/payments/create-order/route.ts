@@ -2,30 +2,29 @@ import { NextRequest, NextResponse } from 'next/server';
 import Razorpay from 'razorpay';
 import { createClient } from '@supabase/supabase-js';
 
-// Initialize Razorpay
-const razorpay = new Razorpay({
-  key_id: process.env.RAZORPAY_KEY_ID!,
-  key_secret: process.env.RAZORPAY_KEY_SECRET!,
-});
-
-// Initialize Supabase with service role
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!,
-  {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  }
-);
-
 interface CreateOrderRequest {
   amount: number; // Amount in INR
   user_id: string;
 }
 
 export async function POST(req: NextRequest) {
+  // Initialize Razorpay inside request handler
+  const razorpay = new Razorpay({
+    key_id: process.env.RAZORPAY_KEY_ID!,
+    key_secret: process.env.RAZORPAY_KEY_SECRET!,
+  });
+
+  // Initialize Supabase with service role
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
   try {
     const body: CreateOrderRequest = await req.json();
     const { amount, user_id } = body;
@@ -87,7 +86,7 @@ export async function POST(req: NextRequest) {
     const razorpayOrder = await razorpay.orders.create({
       amount: Math.round(amount * 100), // Convert to paise and ensure integer
       currency: 'INR',
-      receipt: `wallet_${user_id}_${Date.now()}`,
+      receipt: `wt_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`, // Max 40 chars
       notes: {
         user_id: user_id,
         wallet_id: wallet.id,
@@ -151,6 +150,18 @@ export async function POST(req: NextRequest) {
 
 // GET endpoint to check order status
 export async function GET(req: NextRequest) {
+  // Initialize Supabase with service role
+  const supabase = createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!,
+    {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+    }
+  );
+
   try {
     const searchParams = req.nextUrl.searchParams;
     const transaction_id = searchParams.get('transaction_id');
