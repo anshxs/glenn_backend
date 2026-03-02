@@ -138,7 +138,7 @@ export async function POST(request: NextRequest) {
     if (txError) {
       console.error('Transaction creation error:', txError);
       return NextResponse.json(
-        { error: 'Failed to create withdrawal transaction' },
+        { error: `Failed to create withdrawal transaction: ${txError.message || JSON.stringify(txError)}` },
         { status: 500 }
       );
     }
@@ -148,7 +148,7 @@ export async function POST(request: NextRequest) {
       .from('wallets')
       .update({
         balance: wallet.balance - totalDeduction,
-        updated_at: new Date().toISOString(),
+        last_updated: new Date().toISOString(),
       })
       .eq('id', wallet.id);
 
@@ -161,7 +161,7 @@ export async function POST(request: NextRequest) {
         .eq('id', transaction.id);
       
       return NextResponse.json(
-        { error: 'Failed to update wallet balance' },
+        { error: `Failed to update wallet balance: ${updateError.message || JSON.stringify(updateError)}` },
         { status: 500 }
       );
     }

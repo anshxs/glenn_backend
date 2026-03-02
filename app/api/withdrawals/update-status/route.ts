@@ -67,7 +67,7 @@ export async function POST(request: NextRequest) {
         .from('wallets')
         .update({
           balance: wallet.balance + refundAmount,
-          updated_at: new Date().toISOString(),
+          last_updated: new Date().toISOString(),
         })
         .eq('id', wallet.id);
 
@@ -84,7 +84,6 @@ export async function POST(request: NextRequest) {
     const updateData: any = {
       withdrawal_status: status,
       payment_status: status === 'PAID' ? 'completed' : status.toLowerCase(),
-      updated_at: new Date().toISOString(),
     };
 
     if (paymentReference) {
