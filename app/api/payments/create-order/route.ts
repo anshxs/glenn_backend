@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
     const body: CreateOrderRequest = await req.json();
     const { amount, user_id, phone } = body;
 
-    if (!amount || amount < 10 || amount > 50000) {
+    if (!amount || amount < 1 || amount > 50000) {
       return NextResponse.json({ error: 'Amount must be between Rs10 and Rs50,000' }, { status: 400 });
     }
     if (!user_id) {
