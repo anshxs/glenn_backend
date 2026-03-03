@@ -70,7 +70,7 @@ export async function POST(req: NextRequest) {
         user_id,
         wallet_id: wallet.id,
         amount,
-        transaction_type: 'MONEY_ADD',
+        transaction_type: 'RAZORPAY_MONEY_ADD',
         payment_status: 'pending',
         razorpay_order_id: orderId,
         old_balance: wallet.balance,
