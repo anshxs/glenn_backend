@@ -56,6 +56,7 @@ export async function POST(req: NextRequest) {
       body: formData.toString(),
     });
     const zapupiData = await zapupiRes.json();
+    console.log('ZapUPI response:', JSON.stringify(zapupiData));
 
     if (zapupiData.status !== 'success') {
       console.error('ZapUPI error:', zapupiData);
@@ -87,7 +88,7 @@ export async function POST(req: NextRequest) {
 
     if (txError) {
       console.error('Failed to create transaction:', txError);
-      return NextResponse.json({ error: 'Failed to create transaction' }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create transaction', detail: txError.message, hint: txError.hint, code: txError.code }, { status: 500 });
     }
 
     return NextResponse.json({
