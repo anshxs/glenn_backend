@@ -48,6 +48,7 @@ export async function POST(req: NextRequest) {
     formData.append('amount', Math.floor(amount).toString());
     formData.append('order_id', orderId);
     formData.append('remark', 'Glenn wallet top-up');
+    formData.append('return_url', 'glenn://payment/callback');
     if (phone && phone.length > 0) formData.append('custumer_mobile', phone);
 
     const zapupiRes = await fetch('https://api.zapupi.com/api/create-order', {
