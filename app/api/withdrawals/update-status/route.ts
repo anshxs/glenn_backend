@@ -9,7 +9,7 @@ const supabase = createClient(
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { transactionId, status, paymentReference, adminNotes } = body;
+    const { transactionId, status, paymentReference, redeemCode, adminNotes } = body;
 
     // Validate required fields
     if (!transactionId || !status) {
@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
 
     // If cancelling or failing, refund the amount to wallet
     if ((status === 'CANCELLED' || status === 'FAILED') && 
-        transaction.withdrawal_status === 'PENDING') {
+        transaction.payment_status === 'pending') {
       const refundAmount = Math.abs(transaction.amount) + (transaction.platform_fee || 0);
       
       // Get the wallet
@@ -82,12 +82,15 @@ export async function POST(request: NextRequest) {
 
     // Update transaction status
     const updateData: any = {
-      withdrawal_status: status,
       payment_status: status === 'PAID' ? 'completed' : status.toLowerCase(),
     };
 
     if (paymentReference) {
       updateData.payment_reference = paymentReference;
+    }
+
+    if (redeemCode) {
+      updateData.redeem_code = redeemCode;
     }
 
     if (adminNotes) {
@@ -150,7 +153,7 @@ export async function GET(request: NextRequest) {
     }
 
     if (status) {
-      query = query.eq('withdrawal_status', status);
+      query = query.eq('payment_status', status.toLowerCase());
     }
 
     query = query.order('created_at', { ascending: false }).limit(50);

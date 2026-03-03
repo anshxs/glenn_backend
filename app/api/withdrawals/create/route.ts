@@ -120,7 +120,6 @@ export async function POST(request: NextRequest) {
         new_balance: wallet.balance - totalDeduction,
         platform_fee: platformFee,
         withdrawal_method: withdrawalMethod,
-        withdrawal_status: 'PENDING',
         withdrawal_account_details: accountDetails || {},
         expected_payout_date: expectedPayoutDate.toISOString(),
         payment_metadata: {
