@@ -5,13 +5,13 @@ import { createClient } from '@supabase/supabase-js';
 const ZAPUPI_GATEWAY_IP = '148.135.143.154';
 
 export async function POST(req: NextRequest) {
-  // Verify source IP
+  // Verify source IP — fail closed: if IP cannot be determined, reject
   const forwardedFor = req.headers.get('x-forwarded-for');
   const realIp = req.headers.get('x-real-ip');
   const sourceIp = (forwardedFor?.split(',')[0] ?? realIp ?? '').trim();
 
-  if (sourceIp && sourceIp !== ZAPUPI_GATEWAY_IP) {
-    console.warn(`ZapUPI webhook blocked from unauthorized IP: ${sourceIp}`);
+  if (!sourceIp || sourceIp !== ZAPUPI_GATEWAY_IP) {
+    console.warn(`ZapUPI webhook blocked from IP: '${sourceIp}'`);
     return NextResponse.json({ error: 'Unauthorized' }, { status: 403 });
   }
 

@@ -6,10 +6,28 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY!
 );
 
+async function verifyToken(authHeader: string | null): Promise<string | null> {
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  return user.id;
+}
+
 export async function POST(request: NextRequest) {
   try {
+    const authenticatedUserId = await verifyToken(request.headers.get('Authorization'));
+    if (!authenticatedUserId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { userId, amount, withdrawalMethod, accountDetails } = body;
+
+    // Ensure the authenticated user matches the requested userId
+    if (userId !== authenticatedUserId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     // Validate required fields
     if (!userId || !amount || !withdrawalMethod) {

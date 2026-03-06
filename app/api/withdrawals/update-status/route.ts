@@ -8,6 +8,12 @@ const supabase = createClient(
 
 export async function POST(request: NextRequest) {
   try {
+    // Admin-only route: require secret key
+    const adminSecret = request.headers.get('x-admin-secret');
+    if (!adminSecret || adminSecret !== process.env.ADMIN_SECRET_KEY) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const body = await request.json();
     const { transactionId, status, paymentReference, redeemCode, adminNotes } = body;
 

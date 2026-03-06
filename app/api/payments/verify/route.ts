@@ -1,12 +1,25 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
 
+async function verifyToken(authHeader: string | null, supabase: any): Promise<string | null> {
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  return user.id;
+}
+
 export async function POST(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
     process.env.SUPABASE_SERVICE_ROLE_KEY!,
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
+
+  const authenticatedUserId = await verifyToken(req.headers.get('Authorization'), supabase);
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
 
   try {
     const body = await req.json();
@@ -24,6 +37,11 @@ export async function POST(req: NextRequest) {
 
     if (txError || !transaction) {
       return NextResponse.json({ error: 'Transaction not found' }, { status: 404 });
+    }
+
+    // Ensure the caller owns this transaction
+    if (transaction.user_id !== authenticatedUserId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     if (transaction.payment_status === 'verified') {

@@ -7,6 +7,14 @@ interface CreateOrderRequest {
   phone?: string;
 }
 
+async function verifyToken(authHeader: string | null, supabase: any): Promise<string | null> {
+  if (!authHeader?.startsWith('Bearer ')) return null;
+  const token = authHeader.substring(7);
+  const { data: { user }, error } = await supabase.auth.getUser(token);
+  if (error || !user) return null;
+  return user.id;
+}
+
 export async function POST(req: NextRequest) {
   const supabase = createClient(
     process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -14,15 +22,25 @@ export async function POST(req: NextRequest) {
     { auth: { autoRefreshToken: false, persistSession: false } }
   );
 
+  const authenticatedUserId = await verifyToken(req.headers.get('Authorization'), supabase);
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+  }
+
   try {
     const body: CreateOrderRequest = await req.json();
     const { amount, user_id, phone } = body;
 
-    if (!amount || amount < 1 || amount > 50000) {
-      return NextResponse.json({ error: 'Amount must be between Rs10 and Rs50,000' }, { status: 400 });
+    if (!amount || amount < 10 || amount > 50000) {
+      return NextResponse.json({ error: 'Amount must be between ₹10 and ₹50,000' }, { status: 400 });
     }
     if (!user_id) {
       return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
+    }
+
+    // Ensure the authenticated user matches the requested user_id
+    if (user_id !== authenticatedUserId) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     const { data: wallet, error: walletError } = await supabase
@@ -89,7 +107,7 @@ export async function POST(req: NextRequest) {
 
     if (txError) {
       console.error('Failed to create transaction:', txError);
-      return NextResponse.json({ error: 'Failed to create transaction', detail: txError.message, hint: txError.hint, code: txError.code }, { status: 500 });
+      return NextResponse.json({ error: 'Failed to create transaction' }, { status: 500 });
     }
 
     return NextResponse.json({
