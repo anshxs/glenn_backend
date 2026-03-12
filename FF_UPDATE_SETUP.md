@@ -1,19 +1,28 @@
 # Free Fire Data Update - Secure Implementation
 
 ## Overview
-Secure system to update Free Fire user data (FFUID, FF name, account creation date) via backend API with JWT authentication. Prevents direct database manipulation via anon key.
+Secure system to update Free Fire user data (FFUID, FF name, account creation date) via **Python backend** which calls the Next.js backend with JWT authentication. This prevents direct database manipulation and ensures data integrity.
 
 ## Architecture
 
 ```
 ┌─────────────┐      ┌──────────────────┐      ┌─────────────────┐      ┌──────────────┐
-│   Flutter   │─────▶│ FF Info API      │─────▶│ Glenn Backend   │─────▶│  Supabase    │
+│   Flutter   │─────▶│ Python API       │─────▶│ Glenn Backend   │─────▶│  Supabase    │
 │     App     │      │ (ffuserinfo.app) │      │   (Vercel)      │      │  Database    │
 └─────────────┘      └──────────────────┘      └─────────────────┘      └──────────────┘
-     │                                                  │
-     │                  JWT Token                       │
-     └──────────────────────────────────────────────────┘
+     │                        │                         ▲
+     │                        │                         │
+     │                  Garena API                 JWT Token
+     │                  (Fetch FF Data)           (Verification)
+     └────────────────────────┘
 ```
+
+**Flow:**
+1. Flutter app calls Python API with `user_id`, `ffuid`, and `jwt_token`
+2. Python API fetches FF data from Garena API (nickname, creation date, level)
+3. Python API calls Next.js backend `/api/ff-update` with JWT token
+4. Next.js backend verifies JWT and updates Supabase using service role key
+5. Response flows back to Flutter app
 
 ## Setup Steps
 
@@ -128,32 +137,26 @@ This policy:
 
 ### 4. Flutter Implementation
 
-The Flutter app now calls the backend API instead of directly updating Supabase:
+The Flutter app now calls the **Python API** which handles both fetching and updating:
 
 **Service Method:**
 ```dart
 // lib/services/ff_userinfo_service.dart
-static Future<bool> updateFFDataViaBackend({
+static Future<bool> fetchAndUpdateFFData({
   required String userId,
   required String ffuid,
-  required String ffName,
-  required String ffCreationDate,
-  int? level,
 }) async {
   final session = Supabase.instance.client.auth.currentSession;
   
   final response = await http.post(
-    Uri.parse('$backendUrl/api/ff-update'),
+    Uri.parse('https://ffuserinfo.vercel.app/fetch_and_update'),
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': 'Bearer ${session.accessToken}',
     },
     body: json.encode({
       'user_id': userId,
       'ffuid': ffuid,
-      'ff_name': ffName,
-      'ff_creation_date': ffCreationDate,
-      if (level != null) 'level': level,
+      'jwt_token': session.accessToken,
     }),
   );
   
@@ -163,21 +166,59 @@ static Future<bool> updateFFDataViaBackend({
 
 **Usage in Onboarding:**
 ```dart
-// Fetch FF data from API
-final userInfo = await FFUserInfoService.fetchUserInfo(ffuid);
-
-// Update via backend (secure)
-await FFUserInfoService.updateFFDataViaBackend(
+// One call does everything: fetch from Garena API and update database
+await FFUserInfoService.fetchAndUpdateFFData(
   userId: userId,
   ffuid: ffuid,
-  ffName: userInfo['nickname'],
-  ffCreationDate: userInfo['created_at'],
 );
+```
+
+### 5. Python API Implementation
+
+**New Endpoint:** `POST /fetch_and_update`
+
+**Request:**
+```json
+{
+  "user_id": "uuid-here",
+  "ffuid": "1101432888",
+  "jwt_token": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
+}
+```
+
+**What it does:**
+1. Validates input parameters
+2. Fetches FF data from Garena API (nickname, creation date, level)
+3. Calls Next.js backend `/api/ff-update` with JWT token
+4. Returns success/error
+
+**Success Response:**
+```json
+{
+  "status": "success",
+  "message": "FF data fetched and updated successfully",
+  "data": {
+    "ffuid": "1101432888",
+    "ff_name": "Gεɴεʀᴀʟㅤㅤ",
+    "ff_creation_date": "1560527366",
+    "level": 67
+  }
+}
 ```
 
 ### 5. Testing
 
-#### Test Direct Update (Should Fail)
+#### Test Complete Flow (Should Succeed)
+```dart
+// In Flutter app - this calls Python API which calls Next.js backend
+final success = await FFUserInfoService.fetchAndUpdateFFData(
+  userId: userId,
+  ffuid: '1101432888',
+);
+// Expected: true
+```
+
+#### Test Direct Update (Should Fail - RLS Protection)
 ```dart
 // This should fail due to RLS policy
 await Supabase.instance.client
@@ -187,37 +228,25 @@ await Supabase.instance.client
 // Expected: Error or no rows updated
 ```
 
-#### Test Backend Update (Should Succeed)
-```dart
-// This should succeed
-final success = await FFUserInfoService.updateFFDataViaBackend(
-  userId: userId,
-  ffuid: '1101432888',
-  ffName: 'TestUser',
-  ffCreationDate: '1560527366',
-);
-// Expected: true
+#### Test Python API Directly
+```bash
+curl -X POST https://ffuserinfo.vercel.app/fetch_and_update \
+  -H "Content-Type: application/json" \
+  -d '{
+    "user_id": "your-user-id",
+    "ffuid": "1101432888",
+    "jwt_token": "your-jwt-token"
+  }'
+# Expected: 200 with success status
 ```
 
-#### Test Unauthorized Access (Should Fail)
+#### Test Backend API Unauthorized (Should Fail)
 ```bash
-# Try to update without token
+# Try to call backend directly without token
 curl -X POST https://glenn-backend.vercel.app/api/ff-update \
   -H "Content-Type: application/json" \
   -d '{"user_id":"uuid","ffuid":"123","ff_name":"Test","ff_creation_date":"123"}'
 # Expected: 401 Unauthorized
-```
-
-#### Test Wrong User (Should Fail)
-```dart
-// Try to update another user's data (should fail with 403)
-await FFUserInfoService.updateFFDataViaBackend(
-  userId: 'different-user-id',  // Not your ID
-  ffuid: '123',
-  ffName: 'Test',
-  ffCreationDate: '123',
-);
-// Expected: false (403 Forbidden)
 ```
 
 ## Database Schema
@@ -252,10 +281,21 @@ await FFUserInfoService.updateFFDataViaBackend(
 ## Troubleshooting
 
 ### "Failed to update FF data"
-- Check JWT token is valid
+- Check JWT token is valid (user is logged in)
+- Verify FFUID is valid and user exists in Free Fire
+- Check Python API logs for Garena API errors
+- Check Next.js backend logs for database update errors
 - Verify user_id matches authenticated user
-- Check FFUID format (must be numeric)
-- Check backend logs for detailed error
+
+### Python API Returns Error
+```bash
+# Check Python API logs on Vercel
+# Common errors:
+# - GARENA_AUTH_FAILED: Garena account credentials expired
+# - PLAYER_DATA_NOT_FOUND: Invalid FF UID
+# - BACKEND_CONNECTION_FAILED: Cannot reach Next.js backend
+# - BACKEND_UPDATE_FAILED: Backend returned error (check backend logs)
+```
 
 ### RLS Policy Not Working
 ```sql
@@ -271,20 +311,25 @@ WHERE relname = 'sensitive_userdata';
 ```
 
 ### Backend API Not Responding
-- Check Vercel deployment status
-- Verify environment variables are set:
-  - `NEXT_PUBLIC_SUPABASE_URL`
-  - `SUPABASE_SERVICE_ROLE_KEY`
+- Check Vercel deployment status for both Python and Next.js
+- Verify environment variables are set
 - Check backend logs in Vercel dashboard
+- Test backend endpoint directly with curl
 
 ## Environment Variables
 
 ### Flutter (.env)
 ```env
-BACKEND_URL=https://glenn-backend.vercel.app
+# No BACKEND_URL needed anymore - Python API is hardcoded
 ```
 
-### Backend (Vercel)
+### Python API (glenn_ffuserinfo)
+```python
+# Hardcoded in app.py
+GLENN_BACKEND_URL = "https://glenn-backend.vercel.app"
+```
+
+### Backend (glenn_backend - Vercel)
 ```env
 NEXT_PUBLIC_SUPABASE_URL=your-supabase-url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your-anon-key
