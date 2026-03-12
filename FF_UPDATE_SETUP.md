@@ -149,7 +149,7 @@ static Future<bool> fetchAndUpdateFFData({
   final session = Supabase.instance.client.auth.currentSession;
   
   final response = await http.post(
-    Uri.parse('https://ffuserinfo.vercel.app/fetch_and_update'),
+    Uri.parse('https://glenn-ffuserinfo.vercel.app/fetch_and_update'),
     headers: {
       'Content-Type': 'application/json',
     },
@@ -230,7 +230,7 @@ await Supabase.instance.client
 
 #### Test Python API Directly
 ```bash
-curl -X POST https://ffuserinfo.vercel.app/fetch_and_update \
+curl -X POST https://glenn-ffuserinfo.vercel.app/fetch_and_update \
   -H "Content-Type: application/json" \
   -d '{
     "user_id": "your-user-id",

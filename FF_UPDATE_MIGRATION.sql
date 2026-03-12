@@ -16,24 +16,40 @@ COMMENT ON COLUMN public.sensitive_userdata.ff_level IS 'Free Fire account level
 -- First, enable RLS if not already enabled
 ALTER TABLE public.sensitive_userdata ENABLE ROW LEVEL SECURITY;
 
--- Drop existing policy if it exists
+-- Drop existing policies/triggers if they exist
 DROP POLICY IF EXISTS "block_ff_data_anon_updates" ON public.sensitive_userdata;
+DROP TRIGGER IF EXISTS prevent_ff_data_update_trigger ON public.sensitive_userdata;
+DROP FUNCTION IF EXISTS prevent_ff_data_update();
 
--- Create policy to block updates to ff_creation_date and ff_level columns via anon key
--- This policy checks if the old values are being changed
-CREATE POLICY "block_ff_data_anon_updates" 
-ON public.sensitive_userdata
-AS RESTRICTIVE
-FOR UPDATE
-TO anon, authenticated
-USING (
-  -- Block updates if ff_creation_date or ff_level is being changed
-  -- The policy will fail if these columns are different between OLD and NEW
-  (
-    (OLD.ff_creation_date IS NOT DISTINCT FROM NEW.ff_creation_date) AND
-    (OLD.ff_level IS NOT DISTINCT FROM NEW.ff_level)
-  )
-);
+-- Create a trigger function to prevent updates to ff_creation_date and ff_level
+-- unless it's from the service role
+CREATE OR REPLACE FUNCTION prevent_ff_data_update()
+RETURNS TRIGGER AS $$
+BEGIN
+  -- Check if current role is service_role (backend API)
+  -- Service role bypasses this restriction
+  IF current_user IN ('service_role', 'postgres') THEN
+    RETURN NEW;
+  END IF;
+  
+  -- For anon/authenticated users, prevent changes to ff_creation_date and ff_level
+  IF (OLD.ff_creation_date IS DISTINCT FROM NEW.ff_creation_date) THEN
+    RAISE EXCEPTION 'Direct updates to ff_creation_date are not allowed. Use the API endpoint.';
+  END IF;
+  
+  IF (OLD.ff_level IS DISTINCT FROM NEW.ff_level) THEN
+    RAISE EXCEPTION 'Direct updates to ff_level are not allowed. Use the API endpoint.';
+  END IF;
+  
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql SECURITY DEFINER;
+
+-- Create trigger to enforce the column update restriction
+CREATE TRIGGER prevent_ff_data_update_trigger
+  BEFORE UPDATE ON public.sensitive_userdata
+  FOR EACH ROW
+  EXECUTE FUNCTION prevent_ff_data_update();
 
 -- 5. Add index for better query performance on ff_creation_date
 CREATE INDEX IF NOT EXISTS idx_sensitive_userdata_ff_creation_date 
