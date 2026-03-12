@@ -136,12 +136,12 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 8. Update public_userdata (ffuid and ff_name)
+    // 8. Update public_userdata (ffuid and ffname)
     const { error: publicUpdateError } = await supabaseAdmin
       .from('public_userdata')
       .update({
         ffuid: ffuid,
-        ff_name: ff_name,
+        ffname: ff_name,
         updated_at: new Date().toISOString()
       })
       .eq('id', user_id);
