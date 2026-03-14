@@ -48,6 +48,10 @@ function getTeamSize(teamMembers: Record<string, any>): number {
   return Object.keys(teamMembers).length + 1; // +1 for the participant themselves
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+}
+
 // Helper function to send OneSignal tournament notification
 async function sendTournamentNotification(
   playerIds: string[],
@@ -122,6 +126,7 @@ export async function POST(request: NextRequest) {
     // 2. Parse request body
     const body: ParticipateRequest = await request.json();
     const { amount, user_id, tournament_id, participant_id, team_members, team_name } = body;
+    const normalizedTeamMembers = team_members ?? {};
 
     // 3. Validate that the authenticated user matches the user_id in the request
     if (authenticatedUserId !== user_id || authenticatedUserId !== participant_id) {
@@ -172,8 +177,27 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. Calculate team size and required slots
-    const teamSize = team_members ? getTeamSize(team_members) : 1;
+    const teamSize = getTeamSize(normalizedTeamMembers);
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
+
+    // Extract valid app-user UUIDs from team_members keys only.
+    // Keys like "member1" are ignored as requested.
+    const teammateUuidKeys = Object.keys(normalizedTeamMembers).filter(isUuid);
+
+    let appTeammateIds: string[] = [];
+    if (teammateUuidKeys.length > 0) {
+      const { data: existingUsers, error: existingUsersError } = await supabaseAdmin
+        .from('sensitive_userdata')
+        .select('id')
+        .in('id', teammateUuidKeys);
+
+      if (!existingUsersError && existingUsers) {
+        appTeammateIds = (existingUsers as Array<{ id: string }>).map((u) => u.id);
+      }
+    }
+
+    // All app participants for this team registration (captain + app teammates)
+    const allAppParticipantIds = Array.from(new Set([participant_id, ...appTeammateIds]));
 
     // 9. Check if enough slots are available
     if (tournament.slotsleft < requiredSlots) {
@@ -186,16 +210,15 @@ export async function POST(request: NextRequest) {
     // 10. Team size validation removed - any team size allowed
 
     // 11. Check if user is already registered for this tournament
-    const { data: existingParticipant } = await supabaseAdmin
+    const { data: existingParticipants } = await supabaseAdmin
       .from('tournament_participants')
-      .select('id')
+      .select('id, participant_id')
       .eq('tournament_id', tournament_id)
-      .eq('participant_id', participant_id)
-      .single();
+      .in('participant_id', allAppParticipantIds);
 
-    if (existingParticipant) {
+    if (existingParticipants && existingParticipants.length > 0) {
       return NextResponse.json(
-        { error: 'Already registered', message: 'You are already registered for this tournament' },
+        { error: 'Already registered', message: 'One or more team members are already registered for this tournament' },
         { status: 400 }
       );
     }
@@ -278,17 +301,17 @@ export async function POST(request: NextRequest) {
       .eq('tournament_id', tournament_id)
       .order('slot_number', { ascending: false })
       .limit(1)
-      .single();
+      .maybeSingle();
 
     const nextSlotNumber = maxSlotData?.slot_number ? maxSlotData.slot_number + 1 : 1;
 
-    // 17. Add participant to tournament
+    // 17. Add captain row to tournament
     const { data: participant, error: participantError } = await supabaseAdmin
       .from('tournament_participants')
       .insert({
         tournament_id: tournament_id,
         participant_id: participant_id,
-        team_members: team_members,
+        team_members: normalizedTeamMembers,
         fee_paid: amount,
         team_name: team_name || (tournament.type === 'solo' ? null : 'Squad Team'),
         transaction_id: transaction.id,
@@ -314,6 +337,48 @@ export async function POST(request: NextRequest) {
         { error: 'Registration failed', message: participantError.message || 'Failed to register for tournament' },
         { status: 500 }
       );
+    }
+
+    // 17b. For duo/squad, add additional rows for app users in team_members.
+    // Non-app placeholders like member1/member2 are skipped.
+    const additionalParticipantIds = allAppParticipantIds.filter((id) => id !== participant_id);
+    if (additionalParticipantIds.length > 0) {
+      const additionalRows = additionalParticipantIds.map((id) => ({
+        tournament_id,
+        participant_id: id,
+        team_members: normalizedTeamMembers,
+        fee_paid: 0,
+        team_name: team_name || (tournament.type === 'solo' ? null : 'Squad Team'),
+        transaction_id: transaction.id,
+        slot_number: nextSlotNumber,
+      }));
+
+      const { error: additionalParticipantsError } = await supabaseAdmin
+        .from('tournament_participants')
+        .insert(additionalRows);
+
+      if (additionalParticipantsError) {
+        // Roll back all related writes if team participant insertion fails.
+        await supabaseAdmin
+          .from('tournament_participants')
+          .delete()
+          .eq('transaction_id', transaction.id);
+
+        await supabaseAdmin
+          .from('transactions')
+          .delete()
+          .eq('id', transaction.id);
+
+        await supabaseAdmin
+          .from('wallets')
+          .update({ balance: oldBalance })
+          .eq('id', wallet.id);
+
+        return NextResponse.json(
+          { error: 'Registration failed', message: additionalParticipantsError.message || 'Failed to add team members' },
+          { status: 500 }
+        );
+      }
     }
 
     // 18. Update tournament slots (this should be handled by trigger, but we'll do it manually too)
@@ -348,15 +413,32 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 20. Get user's OneSignal player ID and send notification
+    // 20. Get user's OneSignal player ID
     const { data: userNotifications } = await supabaseAdmin
       .from('notifications')
       .select('onesignal_player_id, is_notifications_enabled')
       .eq('user_id', user_id)
       .maybeSingle();
 
-    // Store notification in database
-    const { data: notificationData, error: notificationInsertError } = await supabaseAdmin
+    // Send push first, then insert a single user_notifications row with final sent state.
+    let pushSent = false;
+    if (userNotifications?.onesignal_player_id && userNotifications?.is_notifications_enabled) {
+      try {
+        await Promise.race([
+          sendTournamentNotification(
+            [userNotifications.onesignal_player_id],
+            tournament.tournament_name
+          ),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('push_timeout')), 1500)),
+        ]);
+        pushSent = true;
+      } catch (err) {
+        console.error('Push notification failed:', err);
+        pushSent = false;
+      }
+    }
+
+    const { error: notificationInsertError } = await supabaseAdmin
       .from('user_notifications')
       .insert({
         user_id: user_id,
@@ -370,34 +452,11 @@ export async function POST(request: NextRequest) {
           slot_number: participant.slot_number,
         },
         is_read: false,
-        sent: false,
-      })
-      .select('id')
-      .single();
+        sent: pushSent,
+      });
 
     if (notificationInsertError) {
       console.error('Failed to store notification:', notificationInsertError);
-      // Don't fail the request if notification storage fails
-    }
-
-    // Send push notification if user has OneSignal player ID and notifications enabled
-    if (userNotifications?.onesignal_player_id && userNotifications?.is_notifications_enabled) {
-      sendTournamentNotification(
-        [userNotifications.onesignal_player_id],
-        tournament.tournament_name
-      ).then(async () => {
-        // Mark notification as sent only if push notification succeeded
-        if (notificationData?.id) {
-          await supabaseAdmin
-            .from('user_notifications')
-            .update({ sent: true })
-            .eq('id', notificationData.id);
-          console.log('Tournament notification marked as sent in database');
-        }
-      }).catch(err => {
-        console.error('Push notification failed - not marking as sent:', err.message || err);
-        // Notification remains sent: false in database for potential retry
-      });
     }
 
     // 19. Return success response
