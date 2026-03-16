@@ -7,10 +7,10 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const TOURNAMENT_COLUMNS =
-  'id, tournament_name, categories, type, maptype, totalslots, slotsleft, ' +
-  'tournament_datetime, entryfee, prizepool, results_submitted, ' +
-  'registration_allowed, per_kill, description, image_url, banner_url, ' +
-  'organiser_id, organiser_name, organiser_contact, stream_url';
+  'id, tournament_name, description, categories, type, maptype, totalslots, slotsleft, ' +
+  'tournament_datetime, entryfee, prizepool, image_url, prizedistribution, stream_url, ' +
+  'results_submitted, banner_url, support_contact, revive_allowed, per_kill, ' +
+  'registration_allowed, organiser_id, organiser_name, organiser_contact, organiser_commission';
 
 export async function GET(request: NextRequest) {
   try {
