@@ -32,7 +32,7 @@ export async function GET(request: NextRequest) {
         .maybeSingle(),
       supabaseAdmin
         .from('organisers')
-        .select('hosted_count, balance')
+        .select('hosted_count, balance, organiser_commission')
         .eq('user_id', user.id)
         .maybeSingle(),
       supabaseAdmin
@@ -85,6 +85,7 @@ export async function GET(request: NextRequest) {
         stats: {
           hosted_count: statsRes.data?.hosted_count ?? 0,
           balance: statsRes.data?.balance ?? 0,
+          organiser_commission: statsRes.data?.organiser_commission ?? 3,
         },
         my_tournaments: myTournamentsRes.data ?? [],
         available_tournaments: availableTournamentsRes.data ?? [],
