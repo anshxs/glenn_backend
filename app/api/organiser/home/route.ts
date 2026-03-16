@@ -6,6 +6,11 @@ import { supabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+type TournamentRow = {
+  id: string;
+  [key: string]: unknown;
+};
+
 const TOURNAMENT_COLUMNS =
   'id, tournament_name, description, categories, type, maptype, totalslots, slotsleft, ' +
   'tournament_datetime, entryfee, prizepool, image_url, prizedistribution, stream_url, ' +
@@ -79,6 +84,62 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const myTournaments = (myTournamentsRes.data ?? []) as unknown as TournamentRow[];
+    const availableTournaments =
+      (availableTournamentsRes.data ?? []) as unknown as TournamentRow[];
+    const allTournamentIds = Array.from(
+      new Set([
+        ...myTournaments.map((t) => t.id).filter(Boolean),
+        ...availableTournaments.map((t) => t.id).filter(Boolean),
+      ])
+    );
+
+    const participantCountByTournament: Record<string, number> = {};
+
+    if (allTournamentIds.length > 0) {
+      const { data: participantRows, error: participantErr } = await supabaseAdmin
+        .from('tournament_participants')
+        .select('tournament_id, participant_id')
+        .in('tournament_id', allTournamentIds);
+
+      if (participantErr) {
+        return NextResponse.json(
+          { error: 'Failed to fetch tournament participant stats', details: participantErr.message },
+          { status: 500 }
+        );
+      }
+
+      for (const row of participantRows ?? []) {
+        const tid = row.tournament_id as string | null;
+        const pid = row.participant_id as string | null;
+        if (!tid || !pid) continue;
+        if (!(tid in participantCountByTournament)) {
+          participantCountByTournament[tid] = 0;
+        }
+      }
+
+      const uniqueByTournament = new Map<string, Set<string>>();
+      for (const row of participantRows ?? []) {
+        const tid = row.tournament_id as string | null;
+        const pid = row.participant_id as string | null;
+        if (!tid || !pid) continue;
+        if (!uniqueByTournament.has(tid)) {
+          uniqueByTournament.set(tid, new Set<string>());
+        }
+        uniqueByTournament.get(tid)!.add(pid);
+      }
+
+      for (const [tid, participantIds] of uniqueByTournament.entries()) {
+        participantCountByTournament[tid] = participantIds.size;
+      }
+    }
+
+    const withParticipantCount = (list: TournamentRow[]) =>
+      list.map((t) => ({
+        ...t,
+        participant_count: participantCountByTournament[t.id] ?? 0,
+      }));
+
     return NextResponse.json({
       success: true,
       data: {
@@ -88,8 +149,8 @@ export async function GET(request: NextRequest) {
           balance: statsRes.data?.balance ?? 0,
           organiser_commission: statsRes.data?.organiser_commission ?? 3,
         },
-        my_tournaments: myTournamentsRes.data ?? [],
-        available_tournaments: availableTournamentsRes.data ?? [],
+        my_tournaments: withParticipantCount(myTournaments),
+        available_tournaments: withParticipantCount(availableTournaments),
       },
     });
   } catch (error) {
