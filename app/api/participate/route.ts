@@ -47,7 +47,8 @@ function calculateRequiredSlots(tournamentType: string, teamMembersCount: number
   }
 }
 
-// Helper function to get team size
+// Helper function to get team size.
+// The captain is counted separately, so team_members should only contain teammates.
 function getTeamSize(teamMembers: Record<string, any>): number {
   if (!teamMembers || typeof teamMembers !== 'object') {
     return 1;
@@ -149,7 +150,10 @@ export async function POST(request: NextRequest) {
     // 2. Parse request body
     const body: ParticipateRequest = await request.json();
     const { amount, user_id, tournament_id, participant_id, team_members, team_name } = body;
-    const normalizedTeamMembers = team_members ?? {};
+    const rawTeamMembers = team_members ?? {};
+    const normalizedTeamMembers = Object.fromEntries(
+      Object.entries(rawTeamMembers).filter(([key]) => key !== participant_id)
+    );
 
     // 3. Validate that the authenticated user matches the user_id in the request
     if (authenticatedUserId !== user_id || authenticatedUserId !== participant_id) {
@@ -205,7 +209,7 @@ export async function POST(request: NextRequest) {
     const teamSize = getTeamSize(normalizedTeamMembers);
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
-    // Extract valid app-user UUIDs from team_members keys only.
+    // Extract valid app-user UUIDs from teammate keys only.
     // Keys like "member1" are ignored as requested.
     const teammateUuidKeys = Object.keys(normalizedTeamMembers).filter(isUuid);
 
@@ -605,7 +609,7 @@ export async function POST(request: NextRequest) {
           .update({ slotsleft: updatedSlotsLeftAfterReservation + reservedSlots })
           .eq('id', reservedTournamentId)
           .eq('slotsleft', updatedSlotsLeftAfterReservation);
-      } catch (_) {
+      } catch {
         // Ignore rollback failure in global error handler.
       }
     }
