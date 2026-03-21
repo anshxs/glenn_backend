@@ -67,21 +67,6 @@ function getTeamSize(teamMembers: Record<string, any>): number {
   return teammateCount + 1; // +1 for captain
 }
 
-function validateTeamSizeForType(tournamentType: string, teamSize: number): string | null {
-  const normalizedType = tournamentType.trim().toLowerCase();
-  switch (normalizedType) {
-    case 'solo':
-      return teamSize === 1 ? null : 'Solo tournament allows exactly 1 player';
-    case 'duo':
-      return teamSize <= 2 ? null : 'Duo tournament allows maximum 2 players';
-    case 'squad':
-      return teamSize <= 4 ? null : 'Squad tournament allows maximum 4 players';
-    default:
-      // Do not hard-fail on legacy/variant type labels.
-      return null;
-  }
-}
-
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -215,16 +200,9 @@ export async function POST(request: NextRequest) {
     }
 
     // 8. Calculate player count and required slots.
-    // Required slots represent reserved player capacity.
+    // App users are inserted into tournament_participants.
+    // Non-app teammates are counted only for slot reservation.
     const teamSize = getTeamSize(normalizedTeamMembers);
-    const teamSizeValidationError = validateTeamSizeForType(tournament.type, teamSize);
-    if (teamSizeValidationError) {
-      return NextResponse.json(
-        { error: 'Invalid team size', message: teamSizeValidationError },
-        { status: 400 }
-      );
-    }
-
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
     // Extract valid app-user UUIDs from team_members keys only.
