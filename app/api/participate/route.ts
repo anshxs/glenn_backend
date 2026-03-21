@@ -238,38 +238,67 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 10. Atomically reserve required player slots.
-    // This prevents race conditions where concurrent requests overbook.
-    const expectedSlotsLeft = tournament.slotsleft;
-    const targetSlotsLeft = expectedSlotsLeft - requiredSlots;
+    // 10. Atomically reserve required player slots with optimistic retries.
+    // This prevents race-condition false negatives when slots change between read/write.
+    let observedSlotsLeft = Number(tournament.slotsleft ?? 0);
+    let reservationSucceeded = false;
 
-    if (targetSlotsLeft < 0) {
-      return NextResponse.json(
-        {
-          error: 'Insufficient slots',
-          message: `Not enough slots available. Required: ${requiredSlots}, Available: ${expectedSlotsLeft}`,
-        },
-        { status: 400 }
-      );
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (observedSlotsLeft < requiredSlots) {
+        return NextResponse.json(
+          {
+            error: 'Insufficient slots',
+            message: `Not enough slots available. Required: ${requiredSlots}, Available: ${observedSlotsLeft}`,
+          },
+          { status: 400 }
+        );
+      }
+
+      const targetSlotsLeft = observedSlotsLeft - requiredSlots;
+
+      const { data: reservedTournamentRows, error: reserveSlotsError } = await supabaseAdmin
+        .from('tournaments')
+        .update({ slotsleft: targetSlotsLeft })
+        .eq('id', tournament_id)
+        .eq('slotsleft', observedSlotsLeft)
+        .select('slotsleft');
+
+      if (reserveSlotsError) {
+        console.error('Slot reservation error:', reserveSlotsError);
+        return NextResponse.json(
+          { error: 'Registration failed', message: 'Could not reserve tournament slots' },
+          { status: 500 }
+        );
+      }
+
+      if (reservedTournamentRows && reservedTournamentRows.length > 0) {
+        reservationSucceeded = true;
+        reservedSlots = requiredSlots;
+        reservedTournamentId = tournament_id;
+        updatedSlotsLeftAfterReservation = Number(
+          reservedTournamentRows[0]?.slotsleft ?? targetSlotsLeft,
+        );
+        break;
+      }
+
+      // Refresh current slots and retry.
+      const { data: refreshedTournament, error: refreshError } = await supabaseAdmin
+        .from('tournaments')
+        .select('slotsleft')
+        .eq('id', tournament_id)
+        .maybeSingle();
+
+      if (refreshError || !refreshedTournament) {
+        return NextResponse.json(
+          { error: 'Registration failed', message: 'Could not verify slot availability' },
+          { status: 500 }
+        );
+      }
+
+      observedSlotsLeft = Number(refreshedTournament.slotsleft ?? 0);
     }
 
-    const { data: reservedTournamentRows, error: reserveSlotsError } = await supabaseAdmin
-      .from('tournaments')
-      .update({ slotsleft: targetSlotsLeft })
-      .eq('id', tournament_id)
-      .eq('slotsleft', expectedSlotsLeft)
-      .gte('slotsleft', requiredSlots)
-      .select('slotsleft');
-
-    if (reserveSlotsError) {
-      console.error('Slot reservation error:', reserveSlotsError);
-      return NextResponse.json(
-        { error: 'Registration failed', message: 'Could not reserve tournament slots' },
-        { status: 500 }
-      );
-    }
-
-    if (!reservedTournamentRows || reservedTournamentRows.length === 0) {
+    if (!reservationSucceeded || updatedSlotsLeftAfterReservation == null) {
       return NextResponse.json(
         {
           error: 'Insufficient slots',
@@ -278,10 +307,6 @@ export async function POST(request: NextRequest) {
         { status: 400 }
       );
     }
-
-    reservedSlots = requiredSlots;
-    reservedTournamentId = tournament_id;
-    updatedSlotsLeftAfterReservation = reservedTournamentRows[0]?.slotsleft ?? targetSlotsLeft;
 
     // 11. Fetch user's wallet
     const { data: wallet, error: walletError } = await supabaseAdmin
