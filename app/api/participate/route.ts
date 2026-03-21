@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
     const body: ParticipateRequest = await request.json();
     const { amount, user_id, tournament_id, participant_id, team_members, team_name } = body;
     const rawTeamMembers = team_members ?? {};
-    const normalizedTeamMembers = Object.fromEntries(
+    const teamMembersExcludingCaptain = Object.fromEntries(
       Object.entries(rawTeamMembers).filter(([key]) => key !== participant_id)
     );
 
@@ -206,12 +206,12 @@ export async function POST(request: NextRequest) {
     // 8. Calculate player count and required slots.
     // App users are inserted into tournament_participants.
     // Non-app teammates are counted only for slot reservation.
-    const teamSize = getTeamSize(normalizedTeamMembers);
+    const teamSize = getTeamSize(teamMembersExcludingCaptain);
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
     // Extract valid app-user UUIDs from teammate keys only.
     // Keys like "member1" are ignored as requested.
-    const teammateUuidKeys = Object.keys(normalizedTeamMembers).filter(isUuid);
+    const teammateUuidKeys = Object.keys(teamMembersExcludingCaptain).filter(isUuid);
 
     let appTeammateIds: string[] = [];
     if (teammateUuidKeys.length > 0) {
@@ -429,7 +429,7 @@ export async function POST(request: NextRequest) {
       .insert({
         tournament_id: tournament_id,
         participant_id: participant_id,
-        team_members: normalizedTeamMembers,
+        team_members: rawTeamMembers,
         fee_paid: amount,
         team_name: team_name || (tournament.type === 'solo' ? null : 'Squad Team'),
         transaction_id: transaction.id,
@@ -472,7 +472,7 @@ export async function POST(request: NextRequest) {
       const additionalRows = additionalParticipantIds.map((id) => ({
         tournament_id,
         participant_id: id,
-        team_members: normalizedTeamMembers,
+        team_members: rawTeamMembers,
         fee_paid: 0,
         team_name: team_name || (tournament.type === 'solo' ? null : 'Squad Team'),
         transaction_id: transaction.id,
