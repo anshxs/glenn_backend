@@ -578,12 +578,15 @@ export async function POST(request: NextRequest) {
 
   } catch (error) {
     if (reservedSlots > 0 && reservedTournamentId && updatedSlotsLeftAfterReservation != null) {
-      await supabaseAdmin
-        .from('tournaments')
-        .update({ slotsleft: updatedSlotsLeftAfterReservation + reservedSlots })
-        .eq('id', reservedTournamentId)
-        .eq('slotsleft', updatedSlotsLeftAfterReservation)
-        .catch(() => null);
+      try {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: updatedSlotsLeftAfterReservation + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation);
+      } catch (_) {
+        // Ignore rollback failure in global error handler.
+      }
     }
 
     console.error('API Error:', error);
