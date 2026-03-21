@@ -32,7 +32,8 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
 // Helper function to calculate required player slots.
 // Slots are counted per player, not per team.
 function calculateRequiredSlots(tournamentType: string, teamMembersCount: number): number {
-  switch (tournamentType) {
+  const normalizedType = tournamentType.trim().toLowerCase();
+  switch (normalizedType) {
     case 'solo':
       return 1;
     case 'duo':
@@ -52,7 +53,8 @@ function getTeamSize(teamMembers: Record<string, any>): number {
 }
 
 function validateTeamSizeForType(tournamentType: string, teamSize: number): string | null {
-  switch (tournamentType) {
+  const normalizedType = tournamentType.trim().toLowerCase();
+  switch (normalizedType) {
     case 'solo':
       return teamSize === 1 ? null : 'Solo tournament allows exactly 1 player';
     case 'duo':
