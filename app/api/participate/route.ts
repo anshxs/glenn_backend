@@ -29,15 +29,18 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
   }
 }
 
-// Helper function to calculate required slots based on team type
+// Helper function to calculate required player slots.
+// Slots are counted per player, not per team.
 function calculateRequiredSlots(tournamentType: string, teamMembersCount: number): number {
   switch (tournamentType) {
     case 'solo':
       return 1;
     case 'duo':
-      return Math.ceil(teamMembersCount / 2) || 1;
+      // Duo always reserves at least 2 player slots.
+      return Math.max(2, teamMembersCount);
     case 'squad':
-      return Math.ceil(teamMembersCount / 4) || 1;
+      // Squad always reserves at least 4 player slots.
+      return Math.max(4, teamMembersCount);
     default:
       return 1;
   }
@@ -176,7 +179,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 8. Calculate team size and required slots
+    // 8. Calculate player count and required slots.
+    // Required slots represent reserved player capacity.
     const teamSize = getTeamSize(normalizedTeamMembers);
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
