@@ -51,6 +51,19 @@ function getTeamSize(teamMembers: Record<string, any>): number {
   return Object.keys(teamMembers).length + 1; // +1 for the participant themselves
 }
 
+function validateTeamSizeForType(tournamentType: string, teamSize: number): string | null {
+  switch (tournamentType) {
+    case 'solo':
+      return teamSize === 1 ? null : 'Solo tournament allows exactly 1 player';
+    case 'duo':
+      return teamSize <= 2 ? null : 'Duo tournament allows maximum 2 players';
+    case 'squad':
+      return teamSize <= 4 ? null : 'Squad tournament allows maximum 4 players';
+    default:
+      return 'Invalid tournament type';
+  }
+}
+
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
@@ -114,6 +127,10 @@ async function sendTournamentNotification(
 }
 
 export async function POST(request: NextRequest) {
+  let reservedSlots = 0;
+  let reservedTournamentId: string | null = null;
+  let updatedSlotsLeftAfterReservation: number | null = null;
+
   try {
     // 1. Verify authentication
     const authHeader = request.headers.get('Authorization');
@@ -182,6 +199,14 @@ export async function POST(request: NextRequest) {
     // 8. Calculate player count and required slots.
     // Required slots represent reserved player capacity.
     const teamSize = getTeamSize(normalizedTeamMembers);
+    const teamSizeValidationError = validateTeamSizeForType(tournament.type, teamSize);
+    if (teamSizeValidationError) {
+      return NextResponse.json(
+        { error: 'Invalid team size', message: teamSizeValidationError },
+        { status: 400 }
+      );
+    }
+
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
     // Extract valid app-user UUIDs from team_members keys only.
@@ -203,17 +228,7 @@ export async function POST(request: NextRequest) {
     // All app participants for this team registration (captain + app teammates)
     const allAppParticipantIds = Array.from(new Set([participant_id, ...appTeammateIds]));
 
-    // 9. Check if enough slots are available
-    if (tournament.slotsleft < requiredSlots) {
-      return NextResponse.json(
-        { error: 'Insufficient slots', message: `Not enough slots available. Required: ${requiredSlots}, Available: ${tournament.slotsleft}` },
-        { status: 400 }
-      );
-    }
-
-    // 10. Team size validation removed - any team size allowed
-
-    // 11. Check if user is already registered for this tournament
+    // 9. Check if user is already registered for this tournament
     const { data: existingParticipants } = await supabaseAdmin
       .from('tournament_participants')
       .select('id, participant_id')
@@ -227,7 +242,52 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 12. Fetch user's wallet
+    // 10. Atomically reserve required player slots.
+    // This prevents race conditions where concurrent requests overbook.
+    const expectedSlotsLeft = tournament.slotsleft;
+    const targetSlotsLeft = expectedSlotsLeft - requiredSlots;
+
+    if (targetSlotsLeft < 0) {
+      return NextResponse.json(
+        {
+          error: 'Insufficient slots',
+          message: `Not enough slots available. Required: ${requiredSlots}, Available: ${expectedSlotsLeft}`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const { data: reservedTournamentRows, error: reserveSlotsError } = await supabaseAdmin
+      .from('tournaments')
+      .update({ slotsleft: targetSlotsLeft })
+      .eq('id', tournament_id)
+      .eq('slotsleft', expectedSlotsLeft)
+      .gte('slotsleft', requiredSlots)
+      .select('slotsleft');
+
+    if (reserveSlotsError) {
+      console.error('Slot reservation error:', reserveSlotsError);
+      return NextResponse.json(
+        { error: 'Registration failed', message: 'Could not reserve tournament slots' },
+        { status: 500 }
+      );
+    }
+
+    if (!reservedTournamentRows || reservedTournamentRows.length === 0) {
+      return NextResponse.json(
+        {
+          error: 'Insufficient slots',
+          message: `Not enough slots available. Required: ${requiredSlots}, Available may have changed due to concurrent registrations`,
+        },
+        { status: 400 }
+      );
+    }
+
+    reservedSlots = requiredSlots;
+    reservedTournamentId = tournament_id;
+    updatedSlotsLeftAfterReservation = reservedTournamentRows[0]?.slotsleft ?? targetSlotsLeft;
+
+    // 11. Fetch user's wallet
     const { data: wallet, error: walletError } = await supabaseAdmin
       .from('wallets')
       .select('*')
@@ -235,14 +295,28 @@ export async function POST(request: NextRequest) {
       .single<Wallet>();
 
     if (walletError || !wallet) {
+      if (reservedSlots > 0 && reservedTournamentId) {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+      }
       return NextResponse.json(
         { error: 'Wallet not found', message: 'User wallet does not exist' },
         { status: 404 }
       );
     }
 
-    // 13. Check if user has sufficient balance
+    // 12. Check if user has sufficient balance
     if (wallet.balance < amount) {
+      if (reservedSlots > 0 && reservedTournamentId) {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+      }
       return NextResponse.json(
         { 
           error: 'Insufficient balance', 
@@ -252,7 +326,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 14. Begin transaction - Deduct from wallet
+    // 13. Begin transaction - Deduct from wallet
     const oldBalance = wallet.balance;
     const newBalance = oldBalance - amount;
 
@@ -262,6 +336,13 @@ export async function POST(request: NextRequest) {
       .eq('id', wallet.id);
 
     if (walletUpdateError) {
+      if (reservedSlots > 0 && reservedTournamentId) {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+      }
       console.error('Wallet update error:', walletUpdateError);
       return NextResponse.json(
         { error: 'Transaction failed', message: 'Failed to deduct amount from wallet' },
@@ -269,7 +350,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 15. Create transaction record
+    // 14. Create transaction record
     const { data: transaction, error: transactionError } = await supabaseAdmin
       .from('transactions')
       .insert({
@@ -291,6 +372,14 @@ export async function POST(request: NextRequest) {
         .update({ balance: oldBalance })
         .eq('id', wallet.id);
 
+      if (reservedSlots > 0 && reservedTournamentId) {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+      }
+
       console.error('Transaction creation error:', transactionError);
       return NextResponse.json(
         { error: 'Transaction failed', message: 'Failed to create transaction record' },
@@ -298,7 +387,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 16. Get next slot number for this tournament
+    // 15. Get next slot number for this tournament
     const { data: maxSlotData } = await supabaseAdmin
       .from('tournament_participants')
       .select('slot_number')
@@ -309,7 +398,7 @@ export async function POST(request: NextRequest) {
 
     const nextSlotNumber = maxSlotData?.slot_number ? maxSlotData.slot_number + 1 : 1;
 
-    // 17. Add captain row to tournament
+    // 16. Add captain row to tournament
     const { data: participant, error: participantError } = await supabaseAdmin
       .from('tournament_participants')
       .insert({
@@ -336,6 +425,14 @@ export async function POST(request: NextRequest) {
         .update({ balance: oldBalance })
         .eq('id', wallet.id);
 
+      if (reservedSlots > 0 && reservedTournamentId) {
+        await supabaseAdmin
+          .from('tournaments')
+          .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+          .eq('id', reservedTournamentId)
+          .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+      }
+
       console.error('Participant creation error:', participantError);
       return NextResponse.json(
         { error: 'Registration failed', message: participantError.message || 'Failed to register for tournament' },
@@ -343,7 +440,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 17b. For duo/squad, add additional rows for app users in team_members.
+    // 16b. For duo/squad, add additional rows for app users in team_members.
     // Non-app placeholders like member1/member2 are skipped.
     const additionalParticipantIds = allAppParticipantIds.filter((id) => id !== participant_id);
     if (additionalParticipantIds.length > 0) {
@@ -378,6 +475,14 @@ export async function POST(request: NextRequest) {
           .update({ balance: oldBalance })
           .eq('id', wallet.id);
 
+        if (reservedSlots > 0 && reservedTournamentId) {
+          await supabaseAdmin
+            .from('tournaments')
+            .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
+            .eq('id', reservedTournamentId)
+            .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
+        }
+
         return NextResponse.json(
           { error: 'Registration failed', message: additionalParticipantsError.message || 'Failed to add team members' },
           { status: 500 }
@@ -385,18 +490,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 18. Update tournament slots (this should be handled by trigger, but we'll do it manually too)
-    const { error: slotUpdateError } = await supabaseAdmin
-      .from('tournaments')
-      .update({ slotsleft: tournament.slotsleft - requiredSlots })
-      .eq('id', tournament_id);
-
-    if (slotUpdateError) {
-      console.error('Slot update error (non-critical):', slotUpdateError);
-      // Don't rollback for this, as triggers might handle it
-    }
-
-    // 19. Increment tournaments played in sensitive_userdata
+    // 17. Increment tournaments played in sensitive_userdata
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('sensitive_userdata')
       .select('tournmentsplayed')
@@ -417,7 +511,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 20. Get user's OneSignal player ID
+    // 18. Get user's OneSignal player ID
     const { data: userNotifications } = await supabaseAdmin
       .from('notifications')
       .select('onesignal_player_id, is_notifications_enabled')
@@ -475,7 +569,7 @@ export async function POST(request: NextRequest) {
           fee_paid: amount,
           team_name: participant.team_name,
           slot_number: participant.slot_number,
-          slots_remaining: tournament.slotsleft - requiredSlots,
+          slots_remaining: updatedSlotsLeftAfterReservation,
           new_wallet_balance: newBalance
         }
       },
@@ -483,6 +577,15 @@ export async function POST(request: NextRequest) {
     );
 
   } catch (error) {
+    if (reservedSlots > 0 && reservedTournamentId && updatedSlotsLeftAfterReservation != null) {
+      await supabaseAdmin
+        .from('tournaments')
+        .update({ slotsleft: updatedSlotsLeftAfterReservation + reservedSlots })
+        .eq('id', reservedTournamentId)
+        .eq('slotsleft', updatedSlotsLeftAfterReservation)
+        .catch(() => null);
+    }
+
     console.error('API Error:', error);
     return NextResponse.json(
       { 
