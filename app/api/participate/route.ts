@@ -47,11 +47,11 @@ function calculateRequiredSlots(tournamentType: string, teamMembersCount: number
   }
 }
 
-// Helper function to get team size.
-// The captain is counted separately, so team_members should only contain teammates.
+// Helper function to get team size from the posted team_members payload only.
+// We do not auto-add a captain; the payload is the source of truth.
 function getTeamSize(teamMembers: Record<string, any>): number {
   if (!teamMembers || typeof teamMembers !== 'object') {
-    return 1;
+    return 0;
   }
 
   // Count only actual member entries; ignore stray/meta keys.
@@ -65,7 +65,7 @@ function getTeamSize(teamMembers: Record<string, any>): number {
     );
   }).length;
 
-  return teammateCount + 1; // +1 for captain
+  return teammateCount;
 }
 
 function isUuid(value: string): boolean {
@@ -151,9 +151,6 @@ export async function POST(request: NextRequest) {
     const body: ParticipateRequest = await request.json();
     const { amount, user_id, tournament_id, participant_id, team_members, team_name } = body;
     const rawTeamMembers = team_members ?? {};
-    const teamMembersExcludingCaptain = Object.fromEntries(
-      Object.entries(rawTeamMembers).filter(([key]) => key !== participant_id)
-    );
 
     // 3. Validate that the authenticated user matches the user_id in the request
     if (authenticatedUserId !== user_id || authenticatedUserId !== participant_id) {
@@ -206,12 +203,14 @@ export async function POST(request: NextRequest) {
     // 8. Calculate player count and required slots.
     // App users are inserted into tournament_participants.
     // Non-app teammates are counted only for slot reservation.
-    const teamSize = getTeamSize(teamMembersExcludingCaptain);
+    const teamSize = getTeamSize(rawTeamMembers);
     const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
 
     // Extract valid app-user UUIDs from teammate keys only.
     // Keys like "member1" are ignored as requested.
-    const teammateUuidKeys = Object.keys(teamMembersExcludingCaptain).filter(isUuid);
+    const teammateUuidKeys = Object.keys(rawTeamMembers).filter(
+      (key) => key !== participant_id && isUuid(key)
+    );
 
     let appTeammateIds: string[] = [];
     if (teammateUuidKeys.length > 0) {
