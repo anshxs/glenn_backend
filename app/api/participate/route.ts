@@ -49,7 +49,22 @@ function calculateRequiredSlots(tournamentType: string, teamMembersCount: number
 
 // Helper function to get team size
 function getTeamSize(teamMembers: Record<string, any>): number {
-  return Object.keys(teamMembers).length + 1; // +1 for the participant themselves
+  if (!teamMembers || typeof teamMembers !== 'object') {
+    return 1;
+  }
+
+  // Count only actual member entries; ignore stray/meta keys.
+  const teammateCount = Object.values(teamMembers).filter((value) => {
+    if (!value || typeof value !== 'object') return false;
+    const member = value as Record<string, unknown>;
+    return (
+      typeof member.ffuid === 'string' ||
+      typeof member.ffname === 'string' ||
+      typeof member.user_id === 'string'
+    );
+  }).length;
+
+  return teammateCount + 1; // +1 for captain
 }
 
 function validateTeamSizeForType(tournamentType: string, teamSize: number): string | null {
@@ -62,7 +77,8 @@ function validateTeamSizeForType(tournamentType: string, teamSize: number): stri
     case 'squad':
       return teamSize <= 4 ? null : 'Squad tournament allows maximum 4 players';
     default:
-      return 'Invalid tournament type';
+      // Do not hard-fail on legacy/variant type labels.
+      return null;
   }
 }
 
