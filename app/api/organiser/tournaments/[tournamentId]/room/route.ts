@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
-import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
+import {
+  readOrganiserJsonBody,
+  verifyOrganiserRequestSecurity,
+} from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +17,31 @@ type RouteContext = {
 // ── POST – set room ID & password (only within 15 min before start) ───────────
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const securityError = await verifyOrganiserRequestSecurity(request);
+    let rawBody = '';
+    let body: { room_id?: string; room_pass?: string } = {};
+    try {
+      const parsed = await readOrganiserJsonBody<{
+        room_id?: string;
+        room_pass?: string;
+      }>(request);
+      rawBody = parsed.rawBody;
+      body = parsed.data;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse organiser payload.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      bodyText: rawBody,
+    });
     if (securityError) {
       return securityError;
     }
@@ -29,7 +56,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const { tournamentId } = await context.params;
 
-    const body = await request.json() as { room_id?: string; room_pass?: string };
     const roomId = (body.room_id ?? '').trim();
     const roomPass = (body.room_pass ?? '').trim();
 

@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
+import {
+  isSupportedOrganiserBuildHash,
+  verifyOrganiserRequestSecurity,
+} from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -11,23 +14,39 @@ export async function GET(request: NextRequest) {
     const securityError = await verifyOrganiserRequestSecurity(request, {
       allowAnyBuildHash: true,
       allowUnsigned: true,
+      allowLegacySignature: true,
     });
     if (securityError) {
       return securityError;
     }
 
-    const { data, error } = await supabaseAdmin
+    const buildHash = request.headers.get('x-organiser-build-hash');
+    const { data: config, error } = await supabaseAdmin
       .from('organiser_app_config')
-      .select('maintenance_mode, maintenance_message, minimum_version, download_url, updated_at')
+      .select(
+        'maintenance_mode, maintenance_message, minimum_version, download_url, updated_at',
+      )
       .eq('id', 1)
-      .single();
+      .maybeSingle();
 
-    if (error || !data) {
+    if (error) {
       return NextResponse.json(
-        { error: 'Failed to load organiser app config', details: error?.message ?? 'Unknown error' },
-        { status: 500 }
+        {
+          error: 'Failed to load organiser app config',
+          details: error.message,
+        },
+        { status: 500 },
       );
     }
+
+    const data = {
+      maintenance_mode: config?.maintenance_mode ?? false,
+      maintenance_message: config?.maintenance_message ?? '',
+      minimum_version: config?.minimum_version ?? '1.0.0',
+      download_url: config?.download_url ?? '',
+      updated_at: config?.updated_at ?? null,
+      update_required: !isSupportedOrganiserBuildHash(buildHash),
+    };
 
     return NextResponse.json({
       success: true,

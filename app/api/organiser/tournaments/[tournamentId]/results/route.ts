@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
-import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
+import {
+  readOrganiserJsonBody,
+  verifyOrganiserRequestSecurity,
+} from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -223,7 +226,34 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
-    const securityError = await verifyOrganiserRequestSecurity(request);
+    let rawBody = '';
+    let body: {
+      host_remarks?: string;
+      results?: unknown;
+    } = {};
+    try {
+      const parsed = await readOrganiserJsonBody<{
+        host_remarks?: string;
+        results?: unknown;
+      }>(request);
+      rawBody = parsed.rawBody;
+      body = parsed.data;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse organiser payload.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      bodyText: rawBody,
+    });
     if (securityError) {
       return securityError;
     }
@@ -251,11 +281,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     if (tournament.organiser_id !== user.id) {
       return NextResponse.json({ error: 'Only host can submit tournament results' }, { status: 403 });
     }
-
-    const body = (await request.json().catch(() => ({}))) as {
-      host_remarks?: string;
-      results?: unknown;
-    };
 
     const hostRemarks = body.host_remarks?.trim() || null;
     let results: TeamResultInput[];

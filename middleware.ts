@@ -32,7 +32,7 @@ export function middleware(request: NextRequest) {
         'Access-Control-Allow-Origin': corsOrigin,
         'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
         'Access-Control-Allow-Headers':
-          'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature',
+          'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
         'Access-Control-Max-Age': '86400',
         'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
       },
@@ -44,7 +44,7 @@ export function middleware(request: NextRequest) {
   response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
   response.headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature',
+    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
   );
   response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
 
