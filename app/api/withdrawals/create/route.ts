@@ -62,17 +62,8 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Calculate platform fee based on withdrawal method
-    let platformFee = 0;
-    switch (withdrawalMethod) {
-      case 'UPI':
-        platformFee = 0.5;
-        break;
-      case 'BANK':
-      case 'GIFTCARD':
-        platformFee = 1.0;
-        break;
-    }
+    // Fixed platform fee for all withdrawal methods
+    const platformFee = 1.0;
 
     const totalDeduction = withdrawAmount + platformFee;
 
