@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
 import { defaultOrganiserCommission } from '@/lib/organiser-commission';
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -14,6 +15,11 @@ type RouteContext = {
 // ── POST – host a tournament ──────────────────────────────────────────────────
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -171,6 +177,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
 // ── DELETE – unregister from a tournament ─────────────────────────────────────
 export async function DELETE(request: NextRequest, context: RouteContext) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(

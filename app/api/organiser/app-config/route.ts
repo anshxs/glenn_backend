@@ -1,11 +1,21 @@
-import { NextResponse } from 'next/server';
+import { NextRequest, NextResponse } from 'next/server';
+
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-export async function GET() {
+export async function GET(request: NextRequest) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      allowAnyBuildHash: true,
+      allowUnsigned: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const { data, error } = await supabaseAdmin
       .from('organiser_app_config')
       .select('maintenance_mode, maintenance_message, minimum_version, download_url, updated_at')

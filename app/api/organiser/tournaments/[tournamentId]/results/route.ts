@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -82,6 +83,11 @@ function sanitizeResults(input: unknown): TeamResultInput[] {
 
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -217,6 +223,11 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(

@@ -1,12 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { supabaseAdmin } from '@/lib/supabase';
 import { verifyBearerToken } from '@/lib/auth';
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function GET(request: NextRequest) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const authHeader = request.headers.get('Authorization');
     const user = await verifyBearerToken(authHeader);
 

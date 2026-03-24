@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { verifyBearerToken } from '@/lib/auth';
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 import { uploadToImageKit } from '@/lib/imagekit';
 
@@ -36,6 +37,11 @@ function parseBoolean(v: FormDataEntryValue | null): boolean {
 
 export async function GET(request: NextRequest) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -72,6 +78,26 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    const formData = await request.formData();
+    const aadharFile = formData.get('aadhar_file');
+    const securityBody = JSON.stringify({
+      name: String(formData.get('name') ?? '').trim(),
+      contact_number: String(formData.get('contact_number') ?? '').trim(),
+      alternate_contact_number: String(formData.get('alternate_contact_number') ?? '').trim(),
+      address: String(formData.get('address') ?? '').trim(),
+      glenn_id: String(formData.get('glenn_id') ?? '').trim(),
+      is_reappeal: String(formData.get('is_reappeal') ?? '').trim(),
+      reappeal_of: String(formData.get('reappeal_of') ?? '').trim(),
+      has_aadhar_file: aadharFile instanceof File,
+      aadhar_file_size: aadharFile instanceof File ? aadharFile.size : null,
+    });
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      bodyText: securityBody,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -80,8 +106,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const formData = await request.formData();
-
     const name = String(formData.get('name') ?? '').trim();
     const contactNumber = String(formData.get('contact_number') ?? '').trim();
     const alternateContactNumberRaw = String(formData.get('alternate_contact_number') ?? '').trim();
@@ -89,7 +113,6 @@ export async function POST(request: NextRequest) {
     const glennIdRaw = String(formData.get('glenn_id') ?? '').trim();
     const reappealOfRaw = String(formData.get('reappeal_of') ?? '').trim();
     const forceReappeal = parseBoolean(formData.get('is_reappeal'));
-    const aadharFile = formData.get('aadhar_file');
 
     if (!name) return badRequest('name is required');
     if (!contactNumber) return badRequest('contact_number is required');

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
+import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -13,6 +14,11 @@ type RouteContext = {
 // ── POST – set room ID & password (only within 15 min before start) ───────────
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
+    const securityError = await verifyOrganiserRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
