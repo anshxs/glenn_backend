@@ -27,7 +27,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // 1. Fetch organiser row
     const { data: organiser, error: organiserErr } = await supabaseAdmin
       .from('organisers')
-      .select('hosted_count, organiser_commission, name, contact_number')
+      .select('hosted_count, organiser_commission, name, contact_number, balance')
       .eq('user_id', user.id)
       .maybeSingle();
 
@@ -74,6 +74,42 @@ export async function POST(request: NextRequest, context: RouteContext) {
     const oldCount: number = organiser.hosted_count ?? 0;
     const newCount = oldCount + 1;
     const newCommission = defaultOrganiserCommission(newCount);
+    const currentBalance: number = organiser.balance ?? 0;
+
+    const { data: pendingTransactions, error: pendingTransactionsErr } = await supabaseAdmin
+      .from('organiser_transactions')
+      .select('amount')
+      .eq('organiser_id', user.id)
+      .eq('type', 'commission')
+      .eq('status', 'pending');
+
+    if (pendingTransactionsErr) {
+      return NextResponse.json(
+        { error: 'Failed to verify organiser transaction balance', message: pendingTransactionsErr.message },
+        { status: 500 }
+      );
+    }
+
+    const entryFee: number = tournament.entryfee ?? 0;
+    const totalSlots: number = tournament.totalslots ?? 0;
+    const pendingAmount = Math.round(((entryFee * totalSlots * newCommission) / 100) * 100) / 100;
+    const existingPendingAmount = (pendingTransactions ?? []).reduce(
+      (sum, row) => sum + Number(row.amount ?? 0),
+      0
+    );
+    const requiredMinimumBalance = Math.round((existingPendingAmount + pendingAmount) * 100) / 100;
+
+    if (currentBalance < requiredMinimumBalance) {
+      return NextResponse.json(
+        {
+          error: 'Insufficient organiser balance',
+          message:
+            `Maintain at least ₹${requiredMinimumBalance.toFixed(2)} balance to host this tournament. ` +
+            `Current balance: ₹${currentBalance.toFixed(2)}.`,
+        },
+        { status: 400 }
+      );
+    }
 
     // 4. Update organiser
     const { error: updateOrganiserErr } = await supabaseAdmin
@@ -107,9 +143,6 @@ export async function POST(request: NextRequest, context: RouteContext) {
     }
 
     // 6. Insert pending commission transaction
-    const entryFee: number = tournament.entryfee ?? 0;
-    const totalSlots: number = tournament.totalslots ?? 0;
-    const pendingAmount = Math.round(((entryFee * totalSlots * newCommission) / 100) * 100) / 100;
 
     await supabaseAdmin.from('organiser_transactions').insert({
       organiser_id: user.id,
@@ -123,7 +156,11 @@ export async function POST(request: NextRequest, context: RouteContext) {
     return NextResponse.json({
       success: true,
       message: 'Tournament assigned to organiser successfully',
-      data: { hosted_count: newCount, organiser_commission: newCommission },
+      data: {
+        hosted_count: newCount,
+        organiser_commission: newCommission,
+        required_minimum_balance: requiredMinimumBalance,
+      },
     });
   } catch (error) {
     console.error('organiser host tournament POST error:', error);
@@ -194,7 +231,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
     const newCount = Math.max(oldCount - 1, 0);
     const newCommission = defaultOrganiserCommission(newCount);
     const currentBalance: number = organiser.balance ?? 0;
-    const newBalance = Math.max(currentBalance - penaltyAmount, 0);
+    const newBalance = currentBalance - penaltyAmount;
 
     const { error: updateOrganiserErr } = await supabaseAdmin
       .from('organisers')
@@ -250,7 +287,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
         type: 'penalty',
         description: `Unregister penalty for tournament: ${tournament.tournament_name} (forfeited ${commissionPct}% commission)`,
         tournament_id: tournamentId,
-        status: 'paid',
+        status: 'pending',
       });
     }
 
