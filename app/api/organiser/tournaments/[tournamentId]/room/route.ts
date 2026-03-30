@@ -14,6 +14,33 @@ type RouteContext = {
   params: Promise<{ tournamentId: string }>;
 };
 
+function parseTeamMembers(value: unknown): Record<string, unknown> {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>;
+  }
+
+  return {};
+}
+
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
 // ── POST – set room ID & password (only within 15 min before start) ───────────
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
@@ -123,12 +150,28 @@ export async function POST(request: NextRequest, context: RouteContext) {
     // 4. Fetch all registered participant user IDs
     const { data: participants, error: partErr } = await supabaseAdmin
       .from('tournament_participants')
-      .select('participant_id')
+      .select('participant_id, team_members')
       .eq('tournament_id', tournamentId);
 
     if (!partErr && participants && participants.length > 0) {
-      const notifications = participants.map((p: { participant_id: string }) => ({
-        user_id: p.participant_id,
+      const notifiedUserIds = new Set<string>();
+
+      for (const participant of participants) {
+        const participantId = String(participant.participant_id ?? '').trim();
+        if (participantId) {
+          notifiedUserIds.add(participantId);
+        }
+
+        const teamMembers = parseTeamMembers(participant.team_members);
+        for (const memberId of Object.keys(teamMembers)) {
+          if (isUuid(memberId)) {
+            notifiedUserIds.add(memberId);
+          }
+        }
+      }
+
+      const notifications = Array.from(notifiedUserIds).map((userId) => ({
+        user_id: userId,
         type: 'tournament_room_details',
         title: `Room Details — ${tournament.tournament_name}`,
         message: `Room ID: ${roomId} | Password: ${roomPass}`,
@@ -142,12 +185,14 @@ export async function POST(request: NextRequest, context: RouteContext) {
         sent: false,
       }));
 
-      await supabaseAdmin.from('user_notifications').insert(notifications);
+      if (notifications.length > 0) {
+        await supabaseAdmin.from('user_notifications').insert(notifications);
+      }
     }
 
     return NextResponse.json({
       success: true,
-      message: `Room details set and ${(participants ?? []).length} participant(s) notified.`,
+      message: `Room details set and notifications queued successfully.`,
       data: { room_id: roomId, room_pass: roomPass },
     });
   } catch (error) {
