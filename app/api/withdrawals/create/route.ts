@@ -39,7 +39,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate required fields
-    if (amount === null || amount === undefined || !withdrawalMethod) {
+    if (
+      amount === null ||
+      amount === undefined ||
+      (typeof amount !== 'string' && typeof amount !== 'number') ||
+      !withdrawalMethod
+    ) {
       return NextResponse.json(
         { error: 'Missing required fields: amount, withdrawalMethod' },
         { status: 400 }
@@ -56,7 +61,8 @@ export async function POST(request: NextRequest) {
     }
 
     // Validate amount
-    const withdrawAmount = parseFloat(amount);
+    const withdrawAmount =
+      typeof amount === 'number' ? amount : Number.parseFloat(amount);
     if (isNaN(withdrawAmount) || withdrawAmount < 100) {
       return NextResponse.json(
         { error: 'Invalid amount. Minimum withdrawal is ₹100' },
