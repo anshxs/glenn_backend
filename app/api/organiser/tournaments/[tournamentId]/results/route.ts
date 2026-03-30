@@ -113,6 +113,12 @@ function parseTeamMembers(value: unknown): TeamMemberMap {
   return {};
 }
 
+function isUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value
+  );
+}
+
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const securityError = await verifyOrganiserRequestSecurity(request);
@@ -432,6 +438,45 @@ export async function POST(request: NextRequest, context: RouteContext) {
         },
         { status: 500 }
       );
+    }
+
+    const notifiedUserIds = new Set<string>();
+    for (const row of rosterRows ?? []) {
+      const participantId = String(row.participant_id ?? '').trim();
+      if (participantId) {
+        notifiedUserIds.add(participantId);
+      }
+
+      const teamMembers = parseTeamMembers(row.team_members);
+      for (const memberId of Object.keys(teamMembers)) {
+        if (isUuid(memberId)) {
+          notifiedUserIds.add(memberId);
+        }
+      }
+    }
+
+    const notificationRows = Array.from(notifiedUserIds).map((userId) => ({
+      user_id: userId,
+      type: 'tournament_results_updated',
+      title: `Results Updated — ${tournament.tournament_name}`,
+      message: `Results for ${tournament.tournament_name} have been published.`,
+      data: {
+        tournament_id: tournamentId,
+        tournament_name: tournament.tournament_name,
+        results_submitted: true,
+      },
+      is_read: false,
+      sent: false,
+    }));
+
+    if (notificationRows.length > 0) {
+      const { error: notificationInsertError } = await supabaseAdmin
+        .from('user_notifications')
+        .insert(notificationRows);
+
+      if (notificationInsertError) {
+        console.error('Failed to queue result notifications:', notificationInsertError);
+      }
     }
 
     return NextResponse.json({
