@@ -21,18 +21,27 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json();
-    const { userId, amount, withdrawalMethod, accountDetails } = body;
+    const body = await request.json() as Record<string, unknown>;
+    const requestedUserId =
+      typeof body.userId === 'string' ? body.userId : null;
+    const amount = body.amount;
+    const withdrawalMethod =
+      typeof body.withdrawalMethod === 'string' ? body.withdrawalMethod : null;
+    const accountDetails =
+      body.accountDetails && typeof body.accountDetails === 'object'
+        ? body.accountDetails
+        : {};
+    const userId = authenticatedUserId;
 
-    // Ensure the authenticated user matches the requested userId
-    if (userId !== authenticatedUserId) {
+    // Never trust a client-supplied userId.
+    if (requestedUserId !== null && requestedUserId !== authenticatedUserId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
     // Validate required fields
-    if (!userId || !amount || !withdrawalMethod) {
+    if (amount === null || amount === undefined || !withdrawalMethod) {
       return NextResponse.json(
-        { error: 'Missing required fields: userId, amount, withdrawalMethod' },
+        { error: 'Missing required fields: amount, withdrawalMethod' },
         { status: 400 }
       );
     }

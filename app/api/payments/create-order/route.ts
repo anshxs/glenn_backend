@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
+
+const ADD_MONEY_ENABLED = false;
+const ADD_MONEY_DISABLED_MESSAGE =
+  'Wallet add money is temporarily unavailable right now.';
 
 interface CreateOrderRequest {
   amount: number;
@@ -7,7 +11,10 @@ interface CreateOrderRequest {
   phone?: string;
 }
 
-async function verifyToken(authHeader: string | null, supabase: any): Promise<string | null> {
+async function verifyToken(
+  authHeader: string | null,
+  supabase: SupabaseClient
+): Promise<string | null> {
   if (!authHeader?.startsWith('Bearer ')) return null;
   const token = authHeader.substring(7);
   const { data: { user }, error } = await supabase.auth.getUser(token);
@@ -27,19 +34,24 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
+  if (!ADD_MONEY_ENABLED) {
+    return NextResponse.json(
+      { error: ADD_MONEY_DISABLED_MESSAGE },
+      { status: 503 }
+    );
+  }
+
   try {
     const body: CreateOrderRequest = await req.json();
-    const { amount, user_id, phone } = body;
+    const { amount, user_id: requestedUserId, phone } = body;
+    const user_id = authenticatedUserId;
 
     if (!amount || amount < 10 || amount > 50000) {
       return NextResponse.json({ error: 'Amount must be between ₹10 and ₹50,000' }, { status: 400 });
     }
-    if (!user_id) {
-      return NextResponse.json({ error: 'User ID is required' }, { status: 400 });
-    }
 
-    // Ensure the authenticated user matches the requested user_id
-    if (user_id !== authenticatedUserId) {
+    // Never trust a client-supplied user_id.
+    if (requestedUserId && requestedUserId !== authenticatedUserId) {
       return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
     }
 
@@ -118,8 +130,14 @@ export async function POST(req: NextRequest) {
       amount,
     });
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error creating ZapUPI order:', error);
-    return NextResponse.json({ error: error.message || 'Internal server error' }, { status: 500 });
+    return NextResponse.json(
+      {
+        error:
+          error instanceof Error ? error.message : 'Internal server error',
+      },
+      { status: 500 }
+    );
   }
 }

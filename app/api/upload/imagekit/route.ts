@@ -1,8 +1,38 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { createClient } from '@supabase/supabase-js';
 
 // Route segment config
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+const supabase = createClient(
+  process.env.NEXT_PUBLIC_SUPABASE_URL!,
+  process.env.SUPABASE_SERVICE_ROLE_KEY!
+);
+
+async function verifyToken(authHeader: string | null): Promise<string | null> {
+  if (!authHeader || !authHeader.startsWith('Bearer ')) {
+    return null;
+  }
+
+  const token = authHeader.substring(7);
+
+  try {
+    const {
+      data: { user },
+      error,
+    } = await supabase.auth.getUser(token);
+
+    if (error || !user) {
+      return null;
+    }
+
+    return user.id;
+  } catch (error) {
+    console.error('Token verification error:', error);
+    return null;
+  }
+}
 
 // Rate limiting storage (in-memory, consider Redis for production)
 const uploadHistory = new Map<string, number[]>();
@@ -73,6 +103,13 @@ function recordUpload(userId: string) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const authenticatedUserId = await verifyToken(
+      request.headers.get('Authorization')
+    );
+    if (!authenticatedUserId) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     // Get ImageKit credentials from environment (server-side only)
     const privateKey = process.env.IMAGEKIT_PRIVATE_KEY;
     const publicKey = process.env.IMAGEKIT_PUBLIC_KEY;
@@ -90,7 +127,16 @@ export async function POST(request: NextRequest) {
     const formData = await request.formData();
     const file = formData.get('file') as File;
     const folder = (formData.get('folder') as string) || 'avatars';
-    const userId = formData.get('userId') as string;
+    const requestedUserId = formData.get('userId');
+    const userId = authenticatedUserId;
+
+    if (
+      typeof requestedUserId === 'string' &&
+      requestedUserId.trim().length > 0 &&
+      requestedUserId !== authenticatedUserId
+    ) {
+      return NextResponse.json({ error: 'Forbidden' }, { status: 403 });
+    }
 
     if (!file) {
       return NextResponse.json(
@@ -180,17 +226,15 @@ export async function POST(request: NextRequest) {
  * Get rate limit status for a user
  */
 export async function GET(request: NextRequest) {
-  const { searchParams } = new URL(request.url);
-  const userId = searchParams.get('userId');
-
-  if (!userId) {
-    return NextResponse.json(
-      { error: 'userId parameter required' },
-      { status: 400 }
-    );
+  const authenticatedUserId = await verifyToken(
+    request.headers.get('Authorization')
+  );
+  if (!authenticatedUserId) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
   const now = Date.now();
+  const userId = authenticatedUserId;
   const userUploads = uploadHistory.get(userId) || [];
   
   const uploadsLastMinute = userUploads.filter(timestamp => now - timestamp < 60000).length;

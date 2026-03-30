@@ -87,7 +87,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Update transaction status
-    const updateData: any = {
+    const updateData: {
+      payment_status: string;
+      payment_reference?: string;
+      redeem_code?: string;
+      payment_metadata?: Record<string, unknown>;
+    } = {
       payment_status: status === 'PAID' ? 'completed' : status.toLowerCase(),
     };
 
@@ -140,6 +145,11 @@ export async function POST(request: NextRequest) {
 // GET endpoint to fetch withdrawal details
 export async function GET(request: NextRequest) {
   try {
+    const adminSecret = request.headers.get('x-admin-secret');
+    if (!adminSecret || adminSecret !== process.env.ADMIN_SECRET_KEY) {
+      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
+    }
+
     const searchParams = request.nextUrl.searchParams;
     const transactionId = searchParams.get('transactionId');
     const userId = searchParams.get('userId');

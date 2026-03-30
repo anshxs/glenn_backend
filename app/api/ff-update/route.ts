@@ -59,22 +59,29 @@ export async function POST(request: NextRequest) {
 
     // 2. Parse request body
     const body: FFUpdateRequest = await request.json();
-    const { user_id, ffuid, ff_name, ff_creation_date, level } = body;
+    const {
+      user_id: requestedUserId,
+      ffuid,
+      ff_name,
+      ff_creation_date,
+      level,
+    } = body;
+    const user_id = authenticatedUserId;
 
     // 3. Validate required fields
-    if (!user_id || !ffuid || !ff_name || !ff_creation_date) {
+    if (!ffuid || !ff_name || !ff_creation_date) {
       return NextResponse.json(
         { 
           success: false,
           error: 'Validation error', 
-          message: 'Missing required fields: user_id, ffuid, ff_name, ff_creation_date' 
+          message: 'Missing required fields: ffuid, ff_name, ff_creation_date' 
         },
         { status: 400 }
       );
     }
 
-    // 4. Verify that authenticated user matches the user_id in request
-    if (authenticatedUserId !== user_id) {
+    // 4. Never trust a client-supplied user_id.
+    if (requestedUserId && requestedUserId !== authenticatedUserId) {
       return NextResponse.json(
         { 
           success: false,
@@ -160,7 +167,13 @@ export async function POST(request: NextRequest) {
 
     // 9. Update sensitive_userdata (ff_creation_date, ffuid, ffname)
     // Using service role key to bypass RLS
-    const sensitiveUpdate: any = {
+    const sensitiveUpdate: {
+      ff_creation_date: string;
+      ffuid: string;
+      ffname: string;
+      updated_at: string;
+      ff_level?: number;
+    } = {
       ff_creation_date: ff_creation_date,
       ffuid: ffuid,
       ffname: ff_name,

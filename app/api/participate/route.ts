@@ -30,18 +30,15 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
 }
 
 // Helper function to calculate required player slots.
-// Slots are counted per player, not per team.
-function calculateRequiredSlots(tournamentType: string, teamMembersCount: number): number {
+function calculateRequiredSlots(tournamentType: string): number {
   const normalizedType = tournamentType.trim().toLowerCase();
   switch (normalizedType) {
     case 'solo':
       return 1;
     case 'duo':
-      // Duo always reserves at least 2 player slots.
-      return Math.max(2, teamMembersCount);
+      return 2;
     case 'squad':
-      // Squad always reserves at least 4 player slots.
-      return Math.max(4, teamMembersCount);
+      return 4;
     default:
       return 1;
   }
@@ -49,7 +46,7 @@ function calculateRequiredSlots(tournamentType: string, teamMembersCount: number
 
 // Helper function to get team size from the posted team_members payload only.
 // We do not auto-add a captain; the payload is the source of truth.
-function getTeamSize(teamMembers: Record<string, any>): number {
+function getTeamSize(teamMembers: Record<string, unknown>): number {
   if (!teamMembers || typeof teamMembers !== 'object') {
     return 0;
   }
@@ -70,64 +67,6 @@ function getTeamSize(teamMembers: Record<string, any>): number {
 
 function isUuid(value: string): boolean {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
-}
-
-// Helper function to send OneSignal tournament notification
-async function sendTournamentNotification(
-  playerIds: string[],
-  tournamentName: string
-): Promise<void> {
-  const oneSignalAppId = process.env.ONESIGNAL_APP_ID;
-  const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY;
-
-  if (!oneSignalAppId || !oneSignalRestKey) {
-    console.error('OneSignal credentials not configured');
-    throw new Error('OneSignal credentials not configured');
-  }
-
-  if (!playerIds || playerIds.length === 0) {
-    console.log('No player IDs to send notification to');
-    throw new Error('No player IDs provided');
-  }
-
-  try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${oneSignalRestKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: oneSignalAppId,
-        include_player_ids: playerIds,
-        headings: { en: 'Registration Successful! 🎮' },
-        contents: { en: `You are registered for ${tournamentName}` },
-        data: {
-          type: 'tournament_registration',
-          tournament_name: tournamentName,
-        },
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      console.error('OneSignal notification error:', result);
-      throw new Error(`OneSignal API error: ${JSON.stringify(result)}`);
-    }
-
-    // Check if the response contains errors (OneSignal returns 200 even with errors)
-    if (result.errors) {
-      console.error('OneSignal notification failed:', result);
-      throw new Error(`OneSignal notification errors: ${JSON.stringify(result.errors)}`);
-    }
-
-    // Success - notification was sent
-    console.log('Tournament notification sent successfully:', result);
-  } catch (error) {
-    console.error('Failed to send OneSignal notification:', error);
-    throw error; // Re-throw to prevent marking as sent
-  }
 }
 
 export async function POST(request: NextRequest) {
@@ -200,11 +139,21 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 8. Calculate player count and required slots.
-    // App users are inserted into tournament_participants.
-    // Non-app teammates are counted only for slot reservation.
+    // 8. Validate exact team size from payload and reserve the same number of slots.
     const teamSize = getTeamSize(rawTeamMembers);
-    const requiredSlots = calculateRequiredSlots(tournament.type, teamSize);
+    const requiredSlots = calculateRequiredSlots(tournament.type);
+
+    if (teamSize !== requiredSlots) {
+      return NextResponse.json(
+        {
+          error: 'Invalid team size',
+          message:
+            `Tournament type "${tournament.type}" requires exactly ${requiredSlots} ` +
+            `player(s), but received ${teamSize}.`,
+        },
+        { status: 400 }
+      );
+    }
 
     // Extract valid app-user UUIDs from teammate keys only.
     // Keys like "member1" are ignored as requested.
@@ -382,6 +331,7 @@ export async function POST(request: NextRequest) {
         wallet_id: wallet.id,
         amount: -amount, // Negative because it's a deduction
         transaction_type: 'TOURNAMENT_ENTRY',
+        payment_status: 'completed',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
         new_balance: newBalance
@@ -464,56 +414,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 16b. For duo/squad, add additional rows for app users in team_members.
-    // Non-app placeholders like member1/member2 are skipped.
-    const additionalParticipantIds = allAppParticipantIds.filter((id) => id !== participant_id);
-    if (additionalParticipantIds.length > 0) {
-      const additionalRows = additionalParticipantIds.map((id) => ({
-        tournament_id,
-        participant_id: id,
-        team_members: rawTeamMembers,
-        fee_paid: 0,
-        team_name: team_name || (tournament.type === 'solo' ? null : 'Squad Team'),
-        transaction_id: transaction.id,
-        slot_number: nextSlotNumber,
-      }));
-
-      const { error: additionalParticipantsError } = await supabaseAdmin
-        .from('tournament_participants')
-        .insert(additionalRows);
-
-      if (additionalParticipantsError) {
-        // Roll back all related writes if team participant insertion fails.
-        await supabaseAdmin
-          .from('tournament_participants')
-          .delete()
-          .eq('transaction_id', transaction.id);
-
-        await supabaseAdmin
-          .from('transactions')
-          .delete()
-          .eq('id', transaction.id);
-
-        await supabaseAdmin
-          .from('wallets')
-          .update({ balance: oldBalance })
-          .eq('id', wallet.id);
-
-        if (reservedSlots > 0 && reservedTournamentId) {
-          await supabaseAdmin
-            .from('tournaments')
-            .update({ slotsleft: (updatedSlotsLeftAfterReservation ?? 0) + reservedSlots })
-            .eq('id', reservedTournamentId)
-            .eq('slotsleft', updatedSlotsLeftAfterReservation ?? 0);
-        }
-
-        return NextResponse.json(
-          { error: 'Registration failed', message: additionalParticipantsError.message || 'Failed to add team members' },
-          { status: 500 }
-        );
-      }
-    }
-
     // 17. Increment tournaments played in sensitive_userdata
     const { data: userData, error: userDataError } = await supabaseAdmin
       .from('sensitive_userdata')
@@ -535,50 +435,55 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 18. Get user's OneSignal player ID
-    const { data: userNotifications } = await supabaseAdmin
-      .from('notifications')
-      .select('onesignal_player_id, is_notifications_enabled')
-      .eq('user_id', user_id)
-      .maybeSingle();
+    // 18. Notify every app user included in this registration (captain + app teammates).
+    const { data: registeredParticipants, error: registeredParticipantsError } = await supabaseAdmin
+      .from('tournament_participants')
+      .select('id, participant_id, slot_number')
+      .eq('transaction_id', transaction.id);
 
-    // Send push first, then insert a single user_notifications row with final sent state.
-    let pushSent = false;
-    if (userNotifications?.onesignal_player_id && userNotifications?.is_notifications_enabled) {
-      try {
-        await Promise.race([
-          sendTournamentNotification(
-            [userNotifications.onesignal_player_id],
-            tournament.tournament_name
-          ),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('push_timeout')), 1500)),
-        ]);
-        pushSent = true;
-      } catch (err) {
-        console.error('Push notification failed:', err);
-        pushSent = false;
-      }
+    if (registeredParticipantsError) {
+      console.error('Failed to fetch registered participant rows for notifications:', registeredParticipantsError);
     }
 
-    const { error: notificationInsertError } = await supabaseAdmin
-      .from('user_notifications')
-      .insert({
-        user_id: user_id,
+    const participantRowByUserId = new Map<string, { id: string; slot_number: number | null }>();
+    for (const row of registeredParticipants ?? []) {
+      const participantUserId = String(row.participant_id ?? '');
+      if (!participantUserId || participantRowByUserId.has(participantUserId)) continue;
+      participantRowByUserId.set(participantUserId, {
+        id: String(row.id ?? ''),
+        slot_number: row.slot_number == null ? null : Number(row.slot_number),
+      });
+    }
+
+    const notificationRows = allAppParticipantIds.map((appUserId) => {
+      const participantRow = participantRowByUserId.get(appUserId);
+      return {
+        user_id: appUserId,
         type: 'tournament_registration',
         title: 'Registration Successful! 🎮',
         message: `You are registered for ${tournament.tournament_name}`,
         data: {
           tournament_id: tournament_id,
           tournament_name: tournament.tournament_name,
-          participant_id: participant.id,
-          slot_number: participant.slot_number,
+          participant_id: participantRow?.id ?? null,
+          participant_user_id: appUserId,
+          slot_number: participantRow?.slot_number ?? participant.slot_number,
+          registered_by_user_id: user_id,
+          team_name: participant.team_name,
         },
         is_read: false,
-        sent: pushSent,
-      });
+        sent: false,
+      };
+    });
 
-    if (notificationInsertError) {
-      console.error('Failed to store notification:', notificationInsertError);
+    if (notificationRows.length > 0) {
+      const { error: notificationInsertError } = await supabaseAdmin
+        .from('user_notifications')
+        .insert(notificationRows);
+
+      if (notificationInsertError) {
+        console.error('Failed to store registration notifications:', notificationInsertError);
+      }
     }
 
     // 19. Return success response

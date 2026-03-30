@@ -99,24 +99,40 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Parse request body
-    const body = await request.json();
-    const { user_id: follower_id, followee_id } = body;
+    const body = await request.json() as Record<string, unknown>;
+    const requestedFollowerId =
+      typeof body.user_id === 'string' ? body.user_id : null;
+    const followee_id =
+      typeof body.followee_id === 'string' ? body.followee_id : null;
+    const follower_id = authenticatedUserId;
 
-    console.log('Follow request:', { follower_id, followee_id, authenticated: authenticatedUserId });
+    console.log('Follow request:', {
+      requestedFollowerId,
+      follower_id,
+      followee_id,
+      authenticated: authenticatedUserId,
+    });
 
     // 3. Validate request data
-    if (!follower_id || !followee_id) {
+    if (!followee_id) {
       return NextResponse.json(
-        { error: 'Invalid request', message: 'Both user_id and followee_id are required' },
+        { error: 'Invalid request', message: 'followee_id is required' },
         { status: 400 }
       );
     }
 
-    // 4. Validate that the authenticated user matches the follower
-    if (authenticatedUserId !== follower_id) {
+    // 4. Never trust a client-supplied follower ID.
+    if (requestedFollowerId !== null && requestedFollowerId !== authenticatedUserId) {
       return NextResponse.json(
         { error: 'Forbidden', message: 'User ID mismatch with authenticated user' },
         { status: 403 }
+      );
+    }
+
+    if (follower_id === followee_id) {
+      return NextResponse.json(
+        { error: 'Invalid request', message: 'Users cannot follow themselves' },
+        { status: 400 }
       );
     }
 
