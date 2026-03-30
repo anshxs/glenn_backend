@@ -60,25 +60,18 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Fixed platform fee for all withdrawal methods
+    const platformFee = 1.0;
+
     // Validate amount
     const withdrawAmount =
       typeof amount === 'number' ? amount : Number.parseFloat(amount);
-    if (isNaN(withdrawAmount) || withdrawAmount < 100) {
+    if (isNaN(withdrawAmount) || withdrawAmount < 1) {
       return NextResponse.json(
-        { error: 'Invalid amount. Minimum withdrawal is ₹100' },
+        { error: 'Invalid amount. Minimum withdrawal is ₹1' },
         { status: 400 }
       );
     }
-
-    if (withdrawAmount > 50000) {
-      return NextResponse.json(
-        { error: 'Invalid amount. Maximum withdrawal is ₹50,000' },
-        { status: 400 }
-      );
-    }
-
-    // Fixed platform fee for all withdrawal methods
-    const platformFee = 1.0;
 
     const totalDeduction = withdrawAmount + platformFee;
 
@@ -116,6 +109,16 @@ export async function POST(request: NextRequest) {
     if (wallet.balance < totalDeduction) {
       return NextResponse.json(
         { error: `Insufficient balance. Required: ₹${totalDeduction.toFixed(2)} (including ₹${platformFee} fee)` },
+        { status: 400 }
+      );
+    }
+
+    const maxWithdrawAmount = Number(wallet.balance) - platformFee;
+    if (withdrawAmount > maxWithdrawAmount) {
+      return NextResponse.json(
+        {
+          error: `Invalid amount. Maximum withdrawal is ₹${maxWithdrawAmount.toFixed(2)} so the ₹${platformFee.toFixed(2)} platform fee is also covered.`,
+        },
         { status: 400 }
       );
     }
