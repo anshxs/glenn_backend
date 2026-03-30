@@ -28,6 +28,14 @@ type TeamResultInput = {
   }>;
 };
 
+type TeamMemberMap = Record<
+  string,
+  {
+    ffname?: string | null;
+    ffuid?: string | null;
+  }
+>;
+
 function toNumber(value: unknown, fallback = 0): number {
   const n = Number(value);
   return Number.isFinite(n) ? n : fallback;
@@ -84,6 +92,27 @@ function sanitizeResults(input: unknown): TeamResultInput[] {
   return teams;
 }
 
+function parseTeamMembers(value: unknown): TeamMemberMap {
+  if (!value) return {};
+
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+        ? (parsed as TeamMemberMap)
+        : {};
+    } catch {
+      return {};
+    }
+  }
+
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    return value as TeamMemberMap;
+  }
+
+  return {};
+}
+
 export async function GET(request: NextRequest, context: RouteContext) {
   try {
     const securityError = await verifyOrganiserRequestSecurity(request);
@@ -117,7 +146,7 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     const { data: participantRows, error: participantErr } = await supabaseAdmin
       .from('tournament_participants')
-      .select('participant_id, team_name, slot_number')
+      .select('participant_id, team_name, slot_number, team_members')
       .eq('tournament_id', tournamentId)
       .order('slot_number', { ascending: true });
 
@@ -128,16 +157,31 @@ export async function GET(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const participantIds = Array.from(
-      new Set((participantRows ?? []).map((p) => p.participant_id).filter(Boolean))
-    );
+    const participantIds = new Set<string>();
+    for (const row of participantRows ?? []) {
+      const participantId = String(row.participant_id ?? '').trim();
+      if (participantId) {
+        participantIds.add(participantId);
+      }
+
+      const teamMembers = parseTeamMembers(row.team_members);
+      for (const memberId of Object.keys(teamMembers)) {
+        if (
+          /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+            memberId
+          )
+        ) {
+          participantIds.add(memberId);
+        }
+      }
+    }
 
     let userMap = new Map<string, { name: string | null; ffname: string | null; ffuid: string | null }>();
-    if (participantIds.length > 0) {
+    if (participantIds.size > 0) {
       const { data: users, error: usersErr } = await supabaseAdmin
         .from('sensitive_userdata')
         .select('id, name, ffname, ffuid')
-        .in('id', participantIds);
+        .in('id', Array.from(participantIds));
 
       if (usersErr) {
         return NextResponse.json(
@@ -170,9 +214,6 @@ export async function GET(request: NextRequest, context: RouteContext) {
 
     for (const row of participantRows ?? []) {
       const slot = Number(row.slot_number ?? 0);
-      const pid = String(row.participant_id ?? '');
-      if (!pid) continue;
-
       if (!bySlot.has(slot)) {
         bySlot.set(slot, {
           slot_number: slot,
@@ -182,7 +223,27 @@ export async function GET(request: NextRequest, context: RouteContext) {
       }
 
       const existing = bySlot.get(slot)!;
-      if (existing.participants.some((p) => p.participant_id === pid)) {
+      const teamMembers = parseTeamMembers(row.team_members);
+
+      if (Object.keys(teamMembers).length > 0) {
+        for (const [memberId, memberData] of Object.entries(teamMembers)) {
+          if (existing.participants.some((p) => p.participant_id === memberId)) {
+            continue;
+          }
+
+          const profile = userMap.get(memberId);
+          existing.participants.push({
+            participant_id: memberId,
+            name: profile?.name ?? null,
+            ffname: memberData?.ffname?.toString().trim() || profile?.ffname || null,
+            ffuid: memberData?.ffuid?.toString().trim() || profile?.ffuid || null,
+          });
+        }
+        continue;
+      }
+
+      const pid = String(row.participant_id ?? '').trim();
+      if (!pid || existing.participants.some((p) => p.participant_id === pid)) {
         continue;
       }
 
@@ -296,7 +357,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
 
     const { data: rosterRows, error: rosterErr } = await supabaseAdmin
       .from('tournament_participants')
-      .select('participant_id')
+      .select('participant_id, team_members')
       .eq('tournament_id', tournamentId);
 
     if (rosterErr) {
@@ -306,9 +367,18 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    const rosterParticipantIds = new Set(
-      (rosterRows ?? []).map((r) => String(r.participant_id ?? '')).filter(Boolean)
-    );
+    const rosterParticipantIds = new Set<string>();
+    for (const row of rosterRows ?? []) {
+      const participantId = String(row.participant_id ?? '').trim();
+      if (participantId) {
+        rosterParticipantIds.add(participantId);
+      }
+
+      const teamMembers = parseTeamMembers(row.team_members);
+      for (const memberId of Object.keys(teamMembers)) {
+        rosterParticipantIds.add(memberId);
+      }
+    }
 
     for (const team of results) {
       for (const participant of team.participants) {
