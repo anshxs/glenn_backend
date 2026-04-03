@@ -27,64 +27,6 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
   }
 }
 
-// Helper function to send OneSignal notification
-async function sendFollowNotification(
-  playerIds: string[],
-  followerUsername: string
-): Promise<void> {
-  const oneSignalAppId = process.env.ONESIGNAL_APP_ID;
-  const oneSignalRestKey = process.env.ONESIGNAL_REST_API_KEY;
-
-  if (!oneSignalAppId || !oneSignalRestKey) {
-    console.error('OneSignal credentials not configured');
-    throw new Error('OneSignal credentials not configured');
-  }
-
-  if (!playerIds || playerIds.length === 0) {
-    console.log('No player IDs to send notification to');
-    throw new Error('No player IDs provided');
-  }
-
-  try {
-    const response = await fetch('https://onesignal.com/api/v1/notifications', {
-      method: 'POST',
-      headers: {
-        'Authorization': `Basic ${oneSignalRestKey}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        app_id: oneSignalAppId,
-        include_player_ids: playerIds,
-        headings: { en: 'New Follower! 🎉' },
-        contents: { en: `@${followerUsername} started following you` },
-        data: {
-          type: 'new_follower',
-          follower_username: followerUsername,
-        },
-      }),
-    });
-
-    const result = await response.json();
-
-    if (!response.ok) {
-      console.error('OneSignal notification error:', result);
-      throw new Error(`OneSignal API error: ${JSON.stringify(result)}`);
-    }
-
-    // Check if the response contains errors (OneSignal returns 200 even with errors)
-    if (result.errors) {
-      console.error('OneSignal notification failed:', result);
-      throw new Error(`OneSignal notification errors: ${JSON.stringify(result.errors)}`);
-    }
-
-    // Success - notification was sent
-    console.log('Notification sent successfully:', result);
-  } catch (error) {
-    console.error('Failed to send OneSignal notification:', error);
-    throw error; // Re-throw to prevent marking as sent
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     // 1. Verify authentication
@@ -189,13 +131,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Get followee's OneSignal player ID from notifications table
-    const { data: followeeNotifications } = await supabaseAdmin
-      .from('notifications')
-      .select('onesignal_player_id, is_notifications_enabled')
-      .eq('user_id', followee_id)
-      .maybeSingle();
-
     // 7. Check if already following
     const { data: existingFollow } = await supabaseAdmin
       .from('followers')
@@ -229,52 +164,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 9. Store notification in user_notifications table
-    const { data: notificationData, error: notificationInsertError } = await supabaseAdmin
-      .from('user_notifications')
-      .insert({
-        user_id: followee_id, // The user receiving the notification
-        type: 'new_follower',
-        title: 'New Follower! 🎉',
-        message: `@${followerUser.username} started following you`,
-        data: {
-          follower_id: follower_id,
-          follower_username: followerUser.username,
-          follow_id: followData.id,
-        },
-        is_read: false,
-        sent: false, // Initially false, will be updated after successful push notification
-      })
-      .select('id')
-      .single();
-
-    if (notificationInsertError) {
-      console.error('Failed to store notification:', notificationInsertError);
-      // Don't fail the request if notification storage fails
-    }
-
-    // 10. Send push notification to the user being followed
-    if (followeeNotifications?.onesignal_player_id && followeeNotifications?.is_notifications_enabled) {
-      // Send notification and update 'sent' status
-      sendFollowNotification(
-        [followeeNotifications.onesignal_player_id],
-        followerUser.username
-      ).then(async () => {
-        // Mark notification as sent only if push notification succeeded
-        if (notificationData?.id) {
-          await supabaseAdmin
-            .from('user_notifications')
-            .update({ sent: true })
-            .eq('id', notificationData.id);
-          console.log('Notification marked as sent in database');
-        }
-      }).catch(err => {
-        console.error('Push notification failed - not marking as sent:', err.message || err);
-        // Notification remains sent: false in database for potential retry
-      });
-    }
-
-    // 11. Return success response
+    // 9. Return success response
     return NextResponse.json(
       {
         success: true,
