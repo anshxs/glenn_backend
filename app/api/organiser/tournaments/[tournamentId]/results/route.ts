@@ -461,6 +461,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       title: `Results Updated — ${tournament.tournament_name}`,
       message: `Results for ${tournament.tournament_name} have been published.`,
       data: {
+        screen: 'tournament_detail',
         tournament_id: tournamentId,
         tournament_name: tournament.tournament_name,
         results_submitted: true,

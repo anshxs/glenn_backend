@@ -176,6 +176,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         title: `Room Details — ${tournament.tournament_name}`,
         message: `Room ID: ${roomId} | Password: ${roomPass}`,
         data: {
+          screen: 'tournament_detail',
           tournament_id: tournamentId,
           tournament_name: tournament.tournament_name,
           room_id: roomId,

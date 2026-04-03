@@ -463,6 +463,7 @@ export async function POST(request: NextRequest) {
         title: 'Registration Successful! 🎮',
         message: `You are registered for ${tournament.tournament_name}`,
         data: {
+          screen: 'tournament_detail',
           tournament_id: tournament_id,
           tournament_name: tournament.tournament_name,
           participant_id: participantRow?.id ?? null,
