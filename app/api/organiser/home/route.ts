@@ -17,7 +17,7 @@ const TOURNAMENT_COLUMNS =
   'tournament_datetime, entryfee, prizepool, image_url, prizedistribution, stream_url, ' +
   'results_submitted, banner_url, support_contact, revive_allowed, per_kill, ' +
   'registration_allowed, organiser_id, organiser_name, organiser_contact, organiser_commission, ' +
-  'roomid, roompass';
+  'roomid, roompass, result_verified';
 
 export async function GET(request: NextRequest) {
   try {
