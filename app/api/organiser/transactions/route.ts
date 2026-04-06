@@ -82,7 +82,7 @@ export async function GET(request: NextRequest) {
     }));
 
     const pendingLiability = enrichedTransactions
-      .filter((row) => row.status === 'pending')
+      .filter((row) => row.status === 'pending' && row.type === 'commission')
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
 
     return NextResponse.json({
