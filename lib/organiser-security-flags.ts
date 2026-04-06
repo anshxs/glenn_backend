@@ -4,8 +4,10 @@ import { verifyBearerToken } from '@/lib/auth';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export type FlagSeverity = 'low' | 'medium' | 'high' | 'critical';
+export type SecurityFlagApp = 'organiser' | 'glenn' | 'admin' | 'backend' | string;
 
 type FlagInput = {
+  app?: SecurityFlagApp;
   request: NextRequest;
   endpoint: string;
   flagType: string;
@@ -51,7 +53,52 @@ function requestIp(request: NextRequest): string | null {
   return request.headers.get('x-real-ip');
 }
 
+function readContextString(
+  context: Record<string, unknown> | null,
+  keys: string[],
+): string | null {
+  if (!context) {
+    return null;
+  }
+
+  for (const key of keys) {
+    const value = context[key];
+    if (typeof value === 'string' && value.trim()) {
+      return value.trim();
+    }
+  }
+
+  return null;
+}
+
+function collectForensicHeaders(request: NextRequest): Record<string, string> {
+  const names = [
+    'x-forwarded-for',
+    'x-real-ip',
+    'x-forwarded-proto',
+    'x-vercel-ip-country',
+    'x-vercel-ip-country-region',
+    'x-vercel-ip-city',
+    'x-vercel-id',
+    'cf-connecting-ip',
+    'cf-ray',
+    'host',
+    'origin',
+    'referer',
+    'user-agent',
+  ];
+
+  return names.reduce<Record<string, string>>((acc, name) => {
+    const value = request.headers.get(name);
+    if (value) {
+      acc[name] = value;
+    }
+    return acc;
+  }, {});
+}
+
 export async function flagOrganiserSecurityEvent({
+  app = 'organiser',
   request,
   endpoint,
   flagType,
@@ -80,9 +127,11 @@ export async function flagOrganiserSecurityEvent({
   const resolvedDeviceId =
     deviceId ?? request.headers.get('x-organiser-device-id') ?? contextDeviceId;
   const resolvedSessionId = sessionId ?? contextSessionId;
+  const forensicHeaders = collectForensicHeaders(request);
 
-  const { error } = await supabaseAdmin.from('organisers_flagged').insert({
-    organiser_id: actor,
+  const { error } = await supabaseAdmin.from('app_security_flags').insert({
+    app,
+    user_id: actor,
     device_id: resolvedDeviceId,
     session_id: resolvedSessionId,
     endpoint,
@@ -94,32 +143,71 @@ export async function flagOrganiserSecurityEvent({
     ip_address: requestIp(request),
     user_agent: request.headers.get('user-agent'),
     build_hash: request.headers.get('x-organiser-build-hash'),
+    platform: readContextString(parsedContext, ['platform']),
+    platform_version: readContextString(parsedContext, [
+      'platform_version',
+      'platformVersion',
+      'os_version',
+      'osVersion',
+      'release',
+    ]),
+    app_version: readContextString(parsedContext, ['app_version', 'appVersion']),
+    device_model: readContextString(parsedContext, [
+      'device_model',
+      'deviceModel',
+      'model',
+    ]),
+    device_manufacturer: readContextString(parsedContext, [
+      'device_manufacturer',
+      'deviceManufacturer',
+      'manufacturer',
+    ]),
+    device_brand: readContextString(parsedContext, ['device_brand', 'deviceBrand', 'brand']),
+    device_fingerprint: readContextString(parsedContext, [
+      'device_fingerprint',
+      'deviceFingerprint',
+      'fingerprint',
+    ]),
+    signature_sha256: readContextString(parsedContext, [
+      'signature_sha256',
+      'signatureSha256',
+    ]),
+    request_headers: forensicHeaders,
     security_context: parsedContext ?? {},
     metadata,
   });
 
   if (error) {
-    console.error('Failed to insert organisers_flagged row:', error.message);
+    console.error('Failed to insert app_security_flags row:', error.message);
   }
 }
 
 export async function hasBlockingFlagForDevice(
-  deviceId: string | null | undefined,
+  params:
+    | string
+    | null
+    | undefined
+    | { app?: SecurityFlagApp; deviceId: string | null | undefined },
 ): Promise<boolean> {
+  const app = typeof params === 'object' && params !== null ? params.app ?? 'organiser' : 'organiser';
+  const deviceId =
+    typeof params === 'object' && params !== null ? params.deviceId : params;
+
   if (!deviceId) {
     return false;
   }
 
   const { data, error } = await supabaseAdmin
-    .from('organisers_flagged')
+    .from('app_security_flags')
     .select('id')
+    .eq('app', app)
     .eq('device_id', deviceId)
     .eq('status', 'open')
     .eq('should_block', true)
     .limit(1);
 
   if (error) {
-    console.error('Failed to check blocking organiser flags:', error.message);
+    console.error('Failed to check blocking app flags:', error.message);
     return false;
   }
 
@@ -131,6 +219,7 @@ export async function handleHoneypotRequest(
   endpoint: string,
 ): Promise<NextResponse> {
   await flagOrganiserSecurityEvent({
+    app: 'backend',
     request,
     endpoint,
     flagType: 'honeypot_hit',
