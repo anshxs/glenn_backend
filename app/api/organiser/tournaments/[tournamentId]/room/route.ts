@@ -41,7 +41,7 @@ function isUuid(value: string): boolean {
   );
 }
 
-// ── POST – set room ID & password (only within 15 min before start) ───────────
+// ── POST – set room ID & password (only within 10 min before start) ───────────
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     let rawBody = '';
@@ -118,9 +118,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       );
     }
 
-    // 2. Enforce 15-minute window: now must be >= (tournament_datetime - 15 min)
+    // 2. Enforce 10-minute window: now must be >= (tournament_datetime - 10 min)
     const tournamentTime = new Date(tournament.tournament_datetime).getTime();
-    const windowOpen = tournamentTime - 15 * 60 * 1000;
+    const windowOpen = tournamentTime - 10 * 60 * 1000;
     const now = Date.now();
 
     if (now < windowOpen) {
@@ -128,7 +128,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
       return NextResponse.json(
         {
           error: 'Too early',
-          message: `Room details can only be set within 15 minutes of the tournament start. ${minutesLeft} minute(s) remaining.`,
+          message: `Room details can only be set within 10 minutes of the tournament start. ${minutesLeft} minute(s) remaining.`,
         },
         { status: 400 }
       );
