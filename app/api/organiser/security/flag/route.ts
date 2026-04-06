@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
 import { flagOrganiserSecurityEvent } from '@/lib/organiser-security-flags';
+import {
+  readOrganiserJsonBody,
+  verifyOrganiserRequestSecurity,
+} from '@/lib/organiser-request-security';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -24,8 +28,34 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 
 export async function POST(request: NextRequest) {
   try {
+    let bodyText = '';
+    let body: SecurityFlagPayload = {};
+    try {
+      const parsed = await readOrganiserJsonBody<SecurityFlagPayload>(request);
+      bodyText = parsed.bodyForSignature;
+      body = parsed.data;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse organiser payload.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      bodyText,
+      allowBlockedDevice: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
-    const body = (await request.json()) as SecurityFlagPayload;
 
     const flagType =
       typeof body.flag_type === 'string' && body.flag_type.trim()

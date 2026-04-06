@@ -13,8 +13,6 @@ export async function GET(request: NextRequest) {
   try {
     const securityError = await verifyOrganiserRequestSecurity(request, {
       allowAnyBuildHash: true,
-      allowUnsigned: true,
-      allowLegacySignature: true,
     });
     if (securityError) {
       return securityError;

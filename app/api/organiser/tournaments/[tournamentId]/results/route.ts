@@ -303,7 +303,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         host_remarks?: string;
         results?: unknown;
       }>(request);
-      rawBody = parsed.rawBody;
+      rawBody = parsed.bodyForSignature;
       body = parsed.data;
     } catch (error) {
       return NextResponse.json(

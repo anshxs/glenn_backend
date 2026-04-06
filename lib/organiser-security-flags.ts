@@ -97,6 +97,28 @@ function collectForensicHeaders(request: NextRequest): Record<string, string> {
   }, {});
 }
 
+function hasOrganiserProbeSignals(request: NextRequest): boolean {
+  return Boolean(
+    request.headers.get('Authorization')?.startsWith('Bearer ') ||
+      request.headers.get('x-organiser-device-id') ||
+      request.headers.get('x-organiser-security-context') ||
+      request.headers.get('x-organiser-signature') ||
+      request.headers.get('x-organiser-timestamp'),
+  );
+}
+
+function honeypotPayload(endpoint: string): Record<string, unknown> {
+  return {
+    success: true,
+    data: {
+      endpoint,
+      enabled: false,
+      tools: [],
+      sample: true,
+    },
+  };
+}
+
 export async function flagOrganiserSecurityEvent({
   app = 'organiser',
   request,
@@ -218,19 +240,28 @@ export async function handleHoneypotRequest(
   request: NextRequest,
   endpoint: string,
 ): Promise<NextResponse> {
+  const organiserProbe = hasOrganiserProbeSignals(request);
   await flagOrganiserSecurityEvent({
-    app: 'backend',
+    app: organiserProbe ? 'organiser' : 'backend',
     request,
     endpoint,
-    flagType: 'honeypot_hit',
-    reason: `Honeypot endpoint accessed: ${endpoint}`,
-    severity: 'critical',
-    shouldBlock: true,
+    flagType: organiserProbe ? 'organiser_honeypot_access' : 'honeypot_hit',
+    reason: organiserProbe
+      ? `An organiser-authenticated probe touched honeypot endpoint: ${endpoint}`
+      : `Honeypot endpoint accessed: ${endpoint}`,
+    severity: organiserProbe ? 'critical' : 'high',
+    shouldBlock: organiserProbe,
     metadata: {
       method: request.method,
       search: request.nextUrl.search,
+      had_authorization: request.headers.get('Authorization')?.startsWith('Bearer ') === true,
+      had_organiser_headers: organiserProbe,
     },
   });
+
+  if (organiserProbe) {
+    return NextResponse.json(honeypotPayload(endpoint), { status: 200 });
+  }
 
   return NextResponse.json({ error: 'Not found' }, { status: 404 });
 }

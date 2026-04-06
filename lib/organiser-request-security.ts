@@ -21,6 +21,65 @@ type EncryptedPayloadEnvelope = {
   tag: string;
 };
 
+const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
+
+function getOrganiserSharedSecret(): string {
+  const configured = process.env.ORGANISER_REQUEST_HMAC_SECRET?.trim();
+  if (configured) {
+    return configured;
+  }
+
+  if (process.env.NODE_ENV === 'development') {
+    return 'organiser_dev_shared_secret';
+  }
+
+  throw new Error('Missing ORGANISER_REQUEST_HMAC_SECRET');
+}
+
+function isLocalRequest(request: NextRequest): boolean {
+  const host = request.headers.get('host') ?? '';
+  return (
+    host.includes('localhost') ||
+    host.startsWith('127.0.0.1') ||
+    process.env.NODE_ENV === 'development'
+  );
+}
+
+function normalizeFingerprint(value: string | null | undefined): string | null {
+  const normalized = value?.replace(/:/g, '').trim().toUpperCase() ?? '';
+  return normalized ? normalized : null;
+}
+
+function isSupportedBuildHashValue(buildHash: string | null | undefined): boolean {
+  const allowed = (
+    process.env.ORGANISER_ALLOWED_BUILD_HASHES ??
+    process.env.ORGANISER_APP_BUILD_HASH ??
+    ''
+  )
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean);
+
+  if (allowed.length === 0) {
+    return true;
+  }
+
+  if (!buildHash || !buildHash.trim()) {
+    return false;
+  }
+
+  return allowed.includes(buildHash.trim());
+}
+
+function timingSafeEqualHex(a: string, b: string): boolean {
+  const left = Buffer.from(a, 'hex');
+  const right = Buffer.from(b, 'hex');
+  if (left.length !== right.length) {
+    return false;
+  }
+  return crypto.timingSafeEqual(left, right);
+}
+
 function decodeBase64(value: string): Buffer {
   return Buffer.from(value, 'base64');
 }
@@ -32,6 +91,7 @@ export async function verifyOrganiserRequestSecurity(
   const parsedContext = decodeSecurityContextHeader(
     request.headers.get('x-organiser-security-context'),
   );
+  const buildHash = request.headers.get('x-organiser-build-hash');
   const contextDeviceId =
     typeof parsedContext?.device_id === 'string' ? parsedContext.device_id : null;
   const deviceId = request.headers.get('x-organiser-device-id') ?? contextDeviceId;
@@ -42,6 +102,187 @@ export async function verifyOrganiserRequestSecurity(
   const hasSuspiciousApps =
     parsedContext?.has_suspicious_apps === true ||
     parsedContext?.hasSuspiciousApps === true;
+  const isDebuggerAttached =
+    parsedContext?.is_debugger_attached === true ||
+    parsedContext?.isDebuggerAttached === true;
+  const signatureMismatch =
+    parsedContext?.signature_mismatch === true ||
+    parsedContext?.signatureMismatch === true ||
+    parsedContext?.signature_valid === false ||
+    parsedContext?.signatureValid === false;
+
+  const forwardedProto = request.headers.get('x-forwarded-proto') ?? '';
+  if (!isLocalRequest(request) && forwardedProto && forwardedProto !== 'https') {
+    return NextResponse.json(
+      { error: 'HTTPS required', message: 'Only HTTPS requests are allowed.' },
+      { status: 400 },
+    );
+  }
+
+  if (
+    !options.allowAnyBuildHash &&
+    !isSupportedBuildHashValue(buildHash)
+  ) {
+    await flagOrganiserSecurityEvent({
+      app: 'organiser',
+      request,
+      endpoint: request.nextUrl.pathname,
+      flagType: 'unsupported_build_hash',
+      reason: 'An unsupported organiser build attempted to access organiser APIs.',
+      severity: 'high',
+      shouldBlock: true,
+      deviceId,
+      securityContext: parsedContext,
+      metadata: {
+        method: request.method,
+        build_hash: buildHash,
+      },
+    });
+
+    return NextResponse.json(
+      {
+        error: 'Update required',
+        message: 'This organiser build is no longer supported.',
+      },
+      { status: 426 },
+    );
+  }
+
+  const timestamp = request.headers.get('x-organiser-timestamp')?.trim() ?? '';
+  const signature = request.headers.get('x-organiser-signature')?.trim() ?? '';
+
+  if (!timestamp || !signature) {
+    await flagOrganiserSecurityEvent({
+      app: 'organiser',
+      request,
+      endpoint: request.nextUrl.pathname,
+      flagType: 'missing_request_signature',
+      reason: 'An organiser request was missing the signed timestamp headers.',
+      severity: 'high',
+      shouldBlock: true,
+      deviceId,
+      securityContext: parsedContext,
+      metadata: { method: request.method, has_timestamp: !!timestamp },
+    });
+
+    if (!options.allowUnsigned) {
+      return NextResponse.json(
+        {
+          error: 'Unsigned request',
+          message: 'Organiser requests must include a valid signed timestamp.',
+        },
+        { status: 403 },
+      );
+    }
+  } else {
+    const timestampMs = Number(timestamp);
+    const now = Date.now();
+    const isFresh =
+      Number.isFinite(timestampMs) &&
+      Math.abs(now - timestampMs) <= MAX_SIGNATURE_AGE_MS;
+
+    if (!isFresh) {
+      await flagOrganiserSecurityEvent({
+        app: 'organiser',
+        request,
+        endpoint: request.nextUrl.pathname,
+        flagType: 'stale_request_timestamp',
+        reason: 'An organiser request used a stale or invalid signed timestamp.',
+        severity: 'high',
+        shouldBlock: true,
+        deviceId,
+        securityContext: parsedContext,
+        metadata: {
+          method: request.method,
+          timestamp,
+          now,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: 'Expired request',
+          message: 'This organiser request is too old or has an invalid timestamp.',
+        },
+        { status: 403 },
+      );
+    }
+
+    const bodyText =
+      options.bodyText ??
+      (request.method === 'GET' ||
+              request.method === 'DELETE' ||
+              request.method === 'HEAD'
+          ? ''
+          : await request.clone().text());
+    const expectedSignature = crypto
+      .createHmac('sha256', getOrganiserSharedSecret())
+      .update(`${timestamp}${bodyText}`)
+      .digest('hex');
+
+    if (!timingSafeEqualHex(signature.toLowerCase(), expectedSignature)) {
+      await flagOrganiserSecurityEvent({
+        app: 'organiser',
+        request,
+        endpoint: request.nextUrl.pathname,
+        flagType: 'invalid_request_signature',
+        reason: 'An organiser request failed HMAC signature validation.',
+        severity: 'critical',
+        shouldBlock: true,
+        deviceId,
+        securityContext: parsedContext,
+        metadata: {
+          method: request.method,
+          timestamp,
+        },
+      });
+
+      return NextResponse.json(
+        {
+          error: 'Invalid signature',
+          message: 'Organiser request signature validation failed.',
+        },
+        { status: 403 },
+      );
+    }
+  }
+
+  if (isDebuggerAttached || signatureMismatch) {
+    await flagOrganiserSecurityEvent({
+      app: 'organiser',
+      request,
+      endpoint: request.nextUrl.pathname,
+      flagType: signatureMismatch
+        ? 'signing_certificate_mismatch'
+        : 'debugger_attached',
+      reason: signatureMismatch
+        ? 'The organiser app signature did not match the expected release certificate.'
+        : 'A debugger was detected on the organiser runtime.',
+      severity: 'critical',
+      shouldBlock: true,
+      deviceId,
+      securityContext: parsedContext,
+      metadata: {
+        method: request.method,
+        signature_sha256:
+          typeof parsedContext?.signature_sha256 === 'string'
+            ? normalizeFingerprint(parsedContext.signature_sha256)
+            : null,
+        signature_expected_sha256:
+          typeof parsedContext?.signature_expected_sha256 === 'string'
+            ? normalizeFingerprint(parsedContext.signature_expected_sha256)
+            : null,
+      },
+    });
+
+    return NextResponse.json(
+      {
+        error: 'Security blocked',
+        message: 'This organiser runtime failed integrity checks.',
+      },
+      { status: 403 },
+    );
+  }
 
   if (
     !options.allowBlockedDevice &&
@@ -90,45 +331,26 @@ export async function verifyOrganiserRequestSecurity(
     );
   }
 
-  // All security checks removed - pass all requests
-  // Only check HTTPS on production
-  const forwardedProto = request.headers.get('x-forwarded-proto');
-  const host = request.headers.get('host') ?? '';
-  const isLocal =
-    host.includes('localhost') ||
-    host.startsWith('127.0.0.1') ||
-    process.env.NODE_ENV === 'development';
-
-  if (!isLocal && forwardedProto && forwardedProto !== 'https') {
-    return NextResponse.json(
-      { error: 'HTTPS required', message: 'Only HTTPS requests are allowed.' },
-      { status: 400 },
-    );
-  }
-
-  // Skip all security validation - device checks, signatures, contexts, timestamps, etc.
   return null;
 }
 
 export function isSupportedOrganiserBuildHash(
   buildHash: string | null | undefined,
 ): boolean {
-  void buildHash;
-  // All build hashes supported - no version checks
-  return true;
+  return isSupportedBuildHashValue(buildHash);
 }
 
 export async function readOrganiserJsonBody<T>(
   request: NextRequest,
-): Promise<{ rawBody: string; data: T }> {
+): Promise<{ rawBody: string; bodyForSignature: string; data: T }> {
   const rawBody = await request.text();
   if (!rawBody.trim()) {
-    return { rawBody, data: {} as T };
+    return { rawBody, bodyForSignature: '', data: {} as T };
   }
 
   const payloadMode = request.headers.get('x-organiser-payload-mode') ?? 'plain';
   if (payloadMode !== 'aes-256-gcm') {
-    return { rawBody, data: JSON.parse(rawBody) as T };
+    return { rawBody, bodyForSignature: rawBody, data: JSON.parse(rawBody) as T };
   }
 
   const envelope = JSON.parse(rawBody) as Partial<EncryptedPayloadEnvelope>;
@@ -141,9 +363,8 @@ export async function readOrganiserJsonBody<T>(
     throw new Error('Missing organiser device ID for decryption.');
   }
 
-  // Derive key from device ID only (simplified)
   const key = crypto
-    .createHmac('sha256', 'organiser_aes_key')
+    .createHmac('sha256', getOrganiserSharedSecret())
     .update(deviceId)
     .digest();
 
@@ -159,5 +380,5 @@ export async function readOrganiserJsonBody<T>(
     decipher.final(),
   ]).toString('utf8');
 
-  return { rawBody, data: JSON.parse(decrypted) as T };
+  return { rawBody, bodyForSignature: decrypted, data: JSON.parse(decrypted) as T };
 }

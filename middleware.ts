@@ -7,48 +7,54 @@ const ALLOWED_ORIGINS = [
   'http://localhost:3000',
 ];
 
+function applyApiSecurityHeaders(
+  response: NextResponse,
+  corsOrigin: string,
+): NextResponse {
+  response.headers.set('Access-Control-Allow-Origin', corsOrigin);
+  response.headers.set(
+    'Access-Control-Allow-Methods',
+    'GET, POST, PUT, DELETE, OPTIONS',
+  );
+  response.headers.set(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
+  );
+  response.headers.set(
+    'Strict-Transport-Security',
+    'max-age=31536000; includeSubDomains; preload',
+  );
+  response.headers.set('X-Content-Type-Options', 'nosniff');
+  return response;
+}
+
 export function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
   const forwardedProto = request.headers.get('x-forwarded-proto') ?? '';
   const host = request.headers.get('host') ?? '';
   const isLocalhost = host.includes('localhost') || host.startsWith('127.0.0.1');
-
-  if (pathname.startsWith('/api/organiser') && forwardedProto && forwardedProto !== 'https' && !isLocalhost) {
-    return NextResponse.json(
-      { error: 'HTTPS required', message: 'Only HTTPS requests are allowed.' },
-      { status: 400 },
-    );
-  }
-
   const origin = request.headers.get('origin') ?? '';
   const isAllowed = ALLOWED_ORIGINS.includes(origin);
   const corsOrigin = isAllowed ? origin : ALLOWED_ORIGINS[0];
 
-  // Handle CORS preflight requests
-  if (request.method === 'OPTIONS') {
-    return new NextResponse(null, {
-      status: 200,
-      headers: {
-        'Access-Control-Allow-Origin': corsOrigin,
-        'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
-        'Access-Control-Allow-Headers':
-          'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
-        'Access-Control-Max-Age': '86400',
-        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
-      },
-    });
+  if (pathname.startsWith('/api/organiser') && forwardedProto && forwardedProto !== 'https' && !isLocalhost) {
+    return applyApiSecurityHeaders(
+      NextResponse.json(
+        { error: 'HTTPS required', message: 'Only HTTPS requests are allowed.' },
+        { status: 400 },
+      ),
+      corsOrigin,
+    );
   }
 
-  const response = NextResponse.next();
-  response.headers.set('Access-Control-Allow-Origin', corsOrigin);
-  response.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  response.headers.set(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
-  );
-  response.headers.set('Strict-Transport-Security', 'max-age=31536000; includeSubDomains; preload');
+  // Handle CORS preflight requests
+  if (request.method === 'OPTIONS') {
+    const response = new NextResponse(null, { status: 200 });
+    response.headers.set('Access-Control-Max-Age', '86400');
+    return applyApiSecurityHeaders(response, corsOrigin);
+  }
 
-  return response;
+  return applyApiSecurityHeaders(NextResponse.next(), corsOrigin);
 }
 
 export const config = {

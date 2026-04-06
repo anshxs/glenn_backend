@@ -51,7 +51,7 @@ export async function POST(request: NextRequest, context: RouteContext) {
         room_id?: string;
         room_pass?: string;
       }>(request);
-      rawBody = parsed.rawBody;
+      rawBody = parsed.bodyForSignature;
       body = parsed.data;
     } catch (error) {
       return NextResponse.json(
