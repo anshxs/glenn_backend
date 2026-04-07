@@ -45,6 +45,23 @@ function isLocalRequest(request: NextRequest): boolean {
   );
 }
 
+function isOrganiserDebugRequest(request: NextRequest, parsedContext?: Record<string, unknown> | null): boolean {
+  const headerValue = request.headers.get('x-organiser-debug-mode')?.trim().toLowerCase();
+  return (
+    headerValue === '1' ||
+    headerValue === 'true' ||
+    parsedContext?.debug_mode_enabled === true ||
+    parsedContext?.debugModeEnabled === true
+  );
+}
+
+function isOrganiserDebugAllowed(): boolean {
+  return (
+    process.env.ORGANISER_ALLOW_DEBUG_REQUESTS === 'true' ||
+    process.env.NODE_ENV === 'development'
+  );
+}
+
 function normalizeFingerprint(value: string | null | undefined): string | null {
   const normalized = value?.replace(/:/g, '').trim().toUpperCase() ?? '';
   return normalized ? normalized : null;
@@ -110,6 +127,10 @@ export async function verifyOrganiserRequestSecurity(
     parsedContext?.signatureMismatch === true ||
     parsedContext?.signature_valid === false ||
     parsedContext?.signatureValid === false;
+  const isDebugRequest = isOrganiserDebugRequest(request, parsedContext);
+  const debugAllowed = isDebugRequest && isOrganiserDebugAllowed();
+  const allowAnyBuildHash = options.allowAnyBuildHash || debugAllowed;
+  const allowUnsigned = options.allowUnsigned || debugAllowed;
 
   const forwardedProto = request.headers.get('x-forwarded-proto') ?? '';
   if (!isLocalRequest(request) && forwardedProto && forwardedProto !== 'https') {
@@ -119,10 +140,18 @@ export async function verifyOrganiserRequestSecurity(
     );
   }
 
-  if (
-    !options.allowAnyBuildHash &&
-    !isSupportedBuildHashValue(buildHash)
-  ) {
+  if (isDebugRequest && !debugAllowed) {
+    return NextResponse.json(
+      {
+        error: 'Debug client blocked',
+        message:
+          'This backend is not configured to accept organiser debug builds.',
+      },
+      { status: 403 },
+    );
+  }
+
+  if (!allowAnyBuildHash && !isSupportedBuildHashValue(buildHash)) {
     await flagOrganiserSecurityEvent({
       app: 'organiser',
       request,
@@ -165,7 +194,7 @@ export async function verifyOrganiserRequestSecurity(
       metadata: { method: request.method, has_timestamp: !!timestamp },
     });
 
-    if (!options.allowUnsigned) {
+    if (!allowUnsigned) {
       return NextResponse.json(
         {
           error: 'Unsigned request',
@@ -247,7 +276,7 @@ export async function verifyOrganiserRequestSecurity(
     }
   }
 
-  if (isDebuggerAttached || signatureMismatch) {
+  if (!debugAllowed && (isDebuggerAttached || signatureMismatch)) {
     await flagOrganiserSecurityEvent({
       app: 'organiser',
       request,
