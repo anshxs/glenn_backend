@@ -51,6 +51,19 @@ export async function GET(request: NextRequest) {
       );
     }
 
+    const { data: wallet, error: walletErr } = await supabaseAdmin
+      .from('wallets')
+      .select('balance, allow_withdrawals, fraud_reason')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (walletErr) {
+      return NextResponse.json(
+        { error: 'Failed to fetch Glenn wallet', details: walletErr.message },
+        { status: 500 }
+      );
+    }
+
     const { data: transactions, error: transactionsErr } = await supabaseAdmin
       .from('organiser_transactions')
       .select('id, organiser_id, amount, type, description, tournament_id, created_at, status, updated_at')
@@ -317,15 +330,3 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
-    const { data: wallet, error: walletErr } = await supabaseAdmin
-      .from('wallets')
-      .select('balance, allow_withdrawals, fraud_reason')
-      .eq('user_id', user.id)
-      .maybeSingle();
-
-    if (walletErr) {
-      return NextResponse.json(
-        { error: 'Failed to fetch Glenn wallet', details: walletErr.message },
-        { status: 500 }
-      );
-    }
