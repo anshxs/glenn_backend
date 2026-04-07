@@ -122,7 +122,7 @@ export async function GET(request: NextRequest) {
 
     let participatedTournamentIds: string[] = [];
 
-    if (tournamentIds.isNotEmpty) {
+    if (tournamentIds.length > 0) {
       const { data: participantRows, error: participantsError } =
         await supabaseAdmin
           .from('tournament_participants')
