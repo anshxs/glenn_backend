@@ -314,6 +314,7 @@ export async function verifyOrganiserRequestSecurity(
   }
 
   if (
+    !debugAllowed &&
     !options.allowBlockedDevice &&
     (isRooted || isJailbroken || hasSuspiciousApps)
   ) {
@@ -348,6 +349,7 @@ export async function verifyOrganiserRequestSecurity(
   }
 
   if (
+    !debugAllowed &&
     !options.allowBlockedDevice &&
     (await hasBlockingFlagForDevice({ app: 'organiser', deviceId }))
   ) {
