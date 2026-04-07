@@ -1,11 +1,22 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
-import { verifyOrganiserRequestSecurity } from '@/lib/organiser-request-security';
+import {
+  readOrganiserJsonBody,
+  verifyOrganiserRequestSecurity,
+} from '@/lib/organiser-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+type TransferPayload = {
+  amount?: unknown;
+};
+
+function roundCurrency(value: number): number {
+  return Math.round(value * 100) / 100;
+}
 
 export async function GET(request: NextRequest) {
   try {
@@ -84,17 +95,145 @@ export async function GET(request: NextRequest) {
     const pendingLiability = enrichedTransactions
       .filter((row) => row.status === 'pending' && row.type === 'commission')
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
+    const balance = Number(organiser.balance ?? 0);
+    const transferableBalance = roundCurrency(
+      Math.max(balance - pendingLiability, 0)
+    );
 
     return NextResponse.json({
       success: true,
       data: {
-        balance: Number(organiser.balance ?? 0),
+        balance,
         pending_liability: Math.round(pendingLiability * 100) / 100,
+        transferable_balance: transferableBalance,
         transactions: enrichedTransactions,
       },
     });
   } catch (error) {
     console.error('organiser transactions GET error:', error);
+    return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
+  }
+}
+
+export async function POST(request: NextRequest) {
+  try {
+    let bodyText = '';
+    let body: TransferPayload = {};
+
+    try {
+      const parsed = await readOrganiserJsonBody<TransferPayload>(request);
+      bodyText = parsed.bodyForSignature;
+      body = parsed.data;
+    } catch {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message: 'Unable to read the transfer request.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyOrganiserRequestSecurity(request, {
+      bodyText,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
+    const user = await verifyBearerToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        { error: 'Unauthorized', message: 'Invalid or missing authentication token' },
+        { status: 401 }
+      );
+    }
+
+    const rawAmount = body.amount;
+    const parsedAmount =
+      typeof rawAmount === 'number'
+        ? rawAmount
+        : typeof rawAmount === 'string'
+          ? Number.parseFloat(rawAmount)
+          : Number.NaN;
+    const amount = roundCurrency(parsedAmount);
+
+    if (!Number.isFinite(amount) || amount <= 0) {
+      return NextResponse.json(
+        {
+          error: 'Invalid amount',
+          message: 'Enter a valid amount greater than zero.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const { data, error } = await supabaseAdmin.rpc(
+      'transfer_organiser_balance_to_wallet',
+      {
+        p_user_id: user.id,
+        p_amount: amount,
+      }
+    );
+
+    if (error) {
+      const message = error.message ?? 'Unable to move organiser balance.';
+      const loweredMessage = message.toLowerCase();
+
+      if (loweredMessage.includes('only approved organisers')) {
+        return NextResponse.json(
+          { error: 'Forbidden', message: 'Only approved organisers can transfer organiser balance.' },
+          { status: 403 }
+        );
+      }
+
+      if (loweredMessage.includes('deposits are disabled')) {
+        return NextResponse.json(
+          { error: 'Deposits disabled', message: 'Deposits are disabled for your Glenn wallet right now.' },
+          { status: 403 }
+        );
+      }
+
+      if (
+        loweredMessage.includes('exceeds available organiser balance') ||
+        loweredMessage.includes('greater than zero')
+      ) {
+        return NextResponse.json(
+          { error: 'Invalid amount', message },
+          { status: 400 }
+        );
+      }
+
+      console.error('organiser transactions POST RPC error:', error);
+      return NextResponse.json(
+        {
+          error: 'Transfer failed',
+          message: 'Unable to move money to your Glenn wallet right now.',
+        },
+        { status: 500 }
+      );
+    }
+
+    const row = Array.isArray(data) ? data[0] : data;
+    const transferredAmount = roundCurrency(Number(row?.transferred_amount ?? amount));
+    const organiserBalance = roundCurrency(Number(row?.organiser_balance ?? 0));
+    const reservedBalance = roundCurrency(Number(row?.reserved_balance ?? 0));
+    const transferableBalance = roundCurrency(Number(row?.transferable_balance ?? 0));
+    const walletBalance = roundCurrency(Number(row?.wallet_balance ?? 0));
+
+    return NextResponse.json({
+      success: true,
+      message: `₹${transferredAmount.toFixed(2)} moved to your Glenn wallet successfully.`,
+      data: {
+        transferred_amount: transferredAmount,
+        organiser_balance: organiserBalance,
+        reserved_balance: reservedBalance,
+        transferable_balance: transferableBalance,
+        wallet_balance: walletBalance,
+      },
+    });
+  } catch (error) {
+    console.error('organiser transactions POST error:', error);
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
