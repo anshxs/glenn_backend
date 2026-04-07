@@ -399,7 +399,7 @@ export async function DELETE(request: NextRequest, context: RouteContext) {
             `Unregister penalty for tournament: ${tournament.tournament_name} ` +
             `(fixed organiser commission forfeited)`,
           tournament_id: tournamentId,
-          status: 'pending',
+          status: 'paid',
         });
 
       if (penaltyInsertErr) {
