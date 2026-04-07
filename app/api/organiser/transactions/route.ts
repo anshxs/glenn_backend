@@ -18,6 +18,10 @@ function roundCurrency(value: number): number {
   return Math.round(value * 100) / 100;
 }
 
+function wholeRupeeAmount(value: number): number {
+  return Math.floor(Math.max(value, 0));
+}
+
 export async function GET(request: NextRequest) {
   try {
     const securityError = await verifyOrganiserRequestSecurity(request);
@@ -96,8 +100,8 @@ export async function GET(request: NextRequest) {
       .filter((row) => row.status === 'pending' && row.type === 'commission')
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
     const balance = Number(organiser.balance ?? 0);
-    const transferableBalance = roundCurrency(
-      Math.max(balance - pendingLiability, 0)
+    const transferableBalance = wholeRupeeAmount(
+      balance - pendingLiability
     );
 
     return NextResponse.json({
@@ -168,6 +172,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!Number.isInteger(amount)) {
+      return NextResponse.json(
+        {
+          error: 'Invalid amount',
+          message: 'Only whole rupee amounts can be transferred.',
+        },
+        { status: 400 }
+      );
+    }
+
     const { data, error } = await supabaseAdmin.rpc(
       'transfer_organiser_balance_to_wallet',
       {
@@ -196,7 +210,8 @@ export async function POST(request: NextRequest) {
 
       if (
         loweredMessage.includes('exceeds available organiser balance') ||
-        loweredMessage.includes('greater than zero')
+        loweredMessage.includes('greater than zero') ||
+        loweredMessage.includes('whole rupee')
       ) {
         return NextResponse.json(
           { error: 'Invalid amount', message },
@@ -215,15 +230,19 @@ export async function POST(request: NextRequest) {
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    const transferredAmount = roundCurrency(Number(row?.transferred_amount ?? amount));
+    const transferredAmount = wholeRupeeAmount(
+      Number(row?.transferred_amount ?? amount)
+    );
     const organiserBalance = roundCurrency(Number(row?.organiser_balance ?? 0));
     const reservedBalance = roundCurrency(Number(row?.reserved_balance ?? 0));
-    const transferableBalance = roundCurrency(Number(row?.transferable_balance ?? 0));
+    const transferableBalance = wholeRupeeAmount(
+      Number(row?.transferable_balance ?? 0)
+    );
     const walletBalance = roundCurrency(Number(row?.wallet_balance ?? 0));
 
     return NextResponse.json({
       success: true,
-      message: `₹${transferredAmount.toFixed(2)} moved to your Glenn wallet successfully.`,
+      message: `₹${transferredAmount} moved to your Glenn wallet successfully.`,
       data: {
         transferred_amount: transferredAmount,
         organiser_balance: organiserBalance,
