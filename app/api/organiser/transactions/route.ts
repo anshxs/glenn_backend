@@ -12,6 +12,7 @@ export const runtime = 'nodejs';
 
 type TransferPayload = {
   amount?: unknown;
+  direction?: unknown;
 };
 
 function roundCurrency(value: number): number {
@@ -100,9 +101,25 @@ export async function GET(request: NextRequest) {
       .filter((row) => row.status === 'pending' && row.type === 'commission')
       .reduce((sum, row) => sum + Number(row.amount ?? 0), 0);
     const balance = Number(organiser.balance ?? 0);
-    const transferableBalance = wholeRupeeAmount(
-      balance - pendingLiability
-    );
+    const transferableBalance = wholeRupeeAmount(balance - pendingLiability);
+    const glennWalletBalance = roundCurrency(Number(wallet?.balance ?? 0));
+    const canImportFromGlenn =
+      wallet?.allow_withdrawals === true &&
+      String(wallet?.fraud_reason ?? '').trim() === '';
+    const importableBalance = canImportFromGlenn
+      ? wholeRupeeAmount(glennWalletBalance)
+      : 0;
+
+    let glennImportDisabledReason: string | null = null;
+    if (!wallet) {
+      glennImportDisabledReason = 'Your Glenn wallet is not ready yet.';
+    } else if (!canImportFromGlenn) {
+      glennImportDisabledReason =
+        'Transfers from your Glenn wallet are disabled right now.';
+    } else if (importableBalance < 1) {
+      glennImportDisabledReason =
+        'At least ₹1 whole balance is needed to import.';
+    }
 
     return NextResponse.json({
       success: true,
@@ -110,6 +127,10 @@ export async function GET(request: NextRequest) {
         balance,
         pending_liability: Math.round(pendingLiability * 100) / 100,
         transferable_balance: transferableBalance,
+        glenn_wallet_balance: glennWalletBalance,
+        importable_balance: importableBalance,
+        glenn_import_allowed: canImportFromGlenn,
+        glenn_import_disabled_reason: glennImportDisabledReason,
         transactions: enrichedTransactions,
       },
     });
@@ -154,6 +175,8 @@ export async function POST(request: NextRequest) {
     }
 
     const rawAmount = body.amount;
+    const direction =
+      typeof body.direction === 'string' ? body.direction.trim() : 'to_glenn';
     const parsedAmount =
       typeof rawAmount === 'number'
         ? rawAmount
@@ -182,13 +205,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data, error } = await supabaseAdmin.rpc(
-      'transfer_organiser_balance_to_wallet',
-      {
-        p_user_id: user.id,
-        p_amount: amount,
-      }
-    );
+    if (direction !== 'to_glenn' && direction !== 'from_glenn') {
+      return NextResponse.json(
+        {
+          error: 'Invalid transfer direction',
+          message: 'Unsupported wallet transfer direction.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const rpcName =
+      direction === 'from_glenn'
+        ? 'transfer_wallet_balance_to_organiser'
+        : 'transfer_organiser_balance_to_wallet';
+
+    const { data, error } = await supabaseAdmin.rpc(rpcName, {
+      p_user_id: user.id,
+      p_amount: amount,
+    });
 
     if (error) {
       const message = error.message ?? 'Unable to move organiser balance.';
@@ -196,7 +231,13 @@ export async function POST(request: NextRequest) {
 
       if (loweredMessage.includes('only approved organisers')) {
         return NextResponse.json(
-          { error: 'Forbidden', message: 'Only approved organisers can transfer organiser balance.' },
+          {
+            error: 'Forbidden',
+            message:
+              direction === 'from_glenn'
+                ? 'Only approved organisers can import money from Glenn wallet.'
+                : 'Only approved organisers can transfer organiser balance.',
+          },
           { status: 403 }
         );
       }
@@ -209,7 +250,24 @@ export async function POST(request: NextRequest) {
       }
 
       if (
+        loweredMessage.includes('transfers are disabled') ||
+        loweredMessage.includes('glenn wallet not found')
+      ) {
+        return NextResponse.json(
+          {
+            error: 'Transfer unavailable',
+            message:
+              loweredMessage.includes('glenn wallet not found')
+                ? 'Your Glenn wallet is not ready right now.'
+                : 'Transfers from your Glenn wallet are disabled right now.',
+          },
+          { status: 403 }
+        );
+      }
+
+      if (
         loweredMessage.includes('exceeds available organiser balance') ||
+        loweredMessage.includes('exceeds available glenn wallet balance') ||
         loweredMessage.includes('greater than zero') ||
         loweredMessage.includes('whole rupee')
       ) {
@@ -223,32 +281,35 @@ export async function POST(request: NextRequest) {
       return NextResponse.json(
         {
           error: 'Transfer failed',
-          message: 'Unable to move money to your Glenn wallet right now.',
+          message:
+            direction === 'from_glenn'
+              ? 'Unable to import money from your Glenn wallet right now.'
+              : 'Unable to move money to your Glenn wallet right now.',
         },
         { status: 500 }
       );
     }
 
     const row = Array.isArray(data) ? data[0] : data;
-    const transferredAmount = wholeRupeeAmount(
-      Number(row?.transferred_amount ?? amount)
-    );
+    const transferredAmount = wholeRupeeAmount(Number(row?.transferred_amount ?? amount));
     const organiserBalance = roundCurrency(Number(row?.organiser_balance ?? 0));
     const reservedBalance = roundCurrency(Number(row?.reserved_balance ?? 0));
-    const transferableBalance = wholeRupeeAmount(
-      Number(row?.transferable_balance ?? 0)
-    );
+    const transferableBalance = wholeRupeeAmount(Number(row?.transferable_balance ?? 0));
     const walletBalance = roundCurrency(Number(row?.wallet_balance ?? 0));
 
     return NextResponse.json({
       success: true,
-      message: `₹${transferredAmount} moved to your Glenn wallet successfully.`,
+      message:
+        direction === 'from_glenn'
+          ? `₹${transferredAmount} imported from your Glenn wallet successfully.`
+          : `₹${transferredAmount} moved to your Glenn wallet successfully.`,
       data: {
         transferred_amount: transferredAmount,
         organiser_balance: organiserBalance,
         reserved_balance: reservedBalance,
         transferable_balance: transferableBalance,
         wallet_balance: walletBalance,
+        direction,
       },
     });
   } catch (error) {
@@ -256,3 +317,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Internal server error' }, { status: 500 });
   }
 }
+    const { data: wallet, error: walletErr } = await supabaseAdmin
+      .from('wallets')
+      .select('balance, allow_withdrawals, fraud_reason')
+      .eq('user_id', user.id)
+      .maybeSingle();
+
+    if (walletErr) {
+      return NextResponse.json(
+        { error: 'Failed to fetch Glenn wallet', details: walletErr.message },
+        { status: 500 }
+      );
+    }
