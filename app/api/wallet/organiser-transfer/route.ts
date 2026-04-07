@@ -61,7 +61,7 @@ export async function GET(request: NextRequest) {
     const organiserBalance = roundCurrency(Number(organiser?.balance ?? 0));
     const transfersEnabled =
       wallet?.allow_withdrawals === true &&
-      String(wallet?.fraud_reason ?? '').trim().isEmpty;
+      String(wallet?.fraud_reason ?? '').trim() === '';
     const transferableBalance =
       isOrganiser && transfersEnabled ? wholeRupeeAmount(walletBalance) : 0;
 
