@@ -13,6 +13,7 @@ type VerifyOptions = {
   allowUnsigned?: boolean;
   allowLegacySignature?: boolean;
   allowBlockedDevice?: boolean;
+  requireEncryptedPayload?: boolean;
 };
 
 type EncryptedPayloadEnvelope = {
@@ -67,6 +68,13 @@ function normalizeFingerprint(value: string | null | undefined): string | null {
   return normalized ? normalized : null;
 }
 
+function getExpectedOrganiserReleaseFingerprint(): string | null {
+  return normalizeFingerprint(
+    process.env.ORGANISER_RELEASE_SIGNING_CERT_SHA256 ??
+      process.env.ORGANISER_SIGNING_CERT_SHA256,
+  );
+}
+
 function isSupportedBuildHashValue(buildHash: string | null | undefined): boolean {
   const allowed = (
     process.env.ORGANISER_ALLOWED_BUILD_HASHES ??
@@ -119,21 +127,48 @@ export async function verifyOrganiserRequestSecurity(
   const hasSuspiciousApps =
     parsedContext?.has_suspicious_apps === true ||
     parsedContext?.hasSuspiciousApps === true;
+  const isTampered =
+    parsedContext?.is_tampered === true || parsedContext?.isTampered === true;
   const isDebuggerAttached =
     parsedContext?.is_debugger_attached === true ||
     parsedContext?.isDebuggerAttached === true;
-  const signatureMismatch =
+  const clientReportedSignatureMismatch =
     parsedContext?.signature_mismatch === true ||
     parsedContext?.signatureMismatch === true ||
     parsedContext?.signature_valid === false ||
     parsedContext?.signatureValid === false;
+  const runtimeSignature = normalizeFingerprint(
+    typeof parsedContext?.signature_sha256 === 'string'
+      ? parsedContext.signature_sha256
+      : null,
+  );
+  const clientExpectedSignature = normalizeFingerprint(
+    typeof parsedContext?.signature_expected_sha256 === 'string'
+      ? parsedContext.signature_expected_sha256
+      : null,
+  );
+  const serverExpectedSignature = getExpectedOrganiserReleaseFingerprint();
+  const signatureExpectedMismatch =
+    !!serverExpectedSignature &&
+    !!clientExpectedSignature &&
+    clientExpectedSignature !== serverExpectedSignature;
+  const serverDetectedSignatureMismatch =
+    !!serverExpectedSignature &&
+    (!runtimeSignature || runtimeSignature !== serverExpectedSignature);
+  const signatureMismatch =
+    clientReportedSignatureMismatch ||
+    signatureExpectedMismatch ||
+    serverDetectedSignatureMismatch;
   const isDebugRequest = isOrganiserDebugRequest(request, parsedContext);
   const debugAllowed = isDebugRequest && isOrganiserDebugAllowed();
   const allowAnyBuildHash = options.allowAnyBuildHash || debugAllowed;
   const allowUnsigned = options.allowUnsigned || debugAllowed;
+  const payloadMode =
+    request.headers.get('x-organiser-payload-mode')?.trim().toLowerCase() ??
+    '';
 
   const forwardedProto = request.headers.get('x-forwarded-proto') ?? '';
-  if (!isLocalRequest(request) && forwardedProto && forwardedProto !== 'https') {
+  if (!isLocalRequest(request) && forwardedProto !== 'https') {
     return NextResponse.json(
       { error: 'HTTPS required', message: 'Only HTTPS requests are allowed.' },
       { status: 400 },
@@ -146,6 +181,53 @@ export async function verifyOrganiserRequestSecurity(
         error: 'Debug client blocked',
         message:
           'This backend is not configured to accept organiser debug builds.',
+      },
+      { status: 403 },
+    );
+  }
+
+  if (
+    !debugAllowed &&
+    process.env.NODE_ENV !== 'development' &&
+    !serverExpectedSignature
+  ) {
+    return NextResponse.json(
+      {
+        error: 'Server misconfigured',
+        message:
+          'Organiser signing verification is not configured on the backend.',
+      },
+      { status: 500 },
+    );
+  }
+
+  if (
+    options.requireEncryptedPayload &&
+    !debugAllowed &&
+    payloadMode !== 'aes-256-gcm'
+  ) {
+    await flagOrganiserSecurityEvent({
+      app: 'organiser',
+      request,
+      endpoint: request.nextUrl.pathname,
+      flagType: 'unencrypted_payload',
+      reason:
+        'A sensitive organiser request was sent without the required encrypted payload envelope.',
+      severity: 'high',
+      shouldBlock: true,
+      deviceId,
+      securityContext: parsedContext,
+      metadata: {
+        method: request.method,
+        payload_mode: payloadMode || null,
+      },
+    });
+
+    return NextResponse.json(
+      {
+        error: 'Encrypted payload required',
+        message:
+          'This organiser action requires an encrypted request payload.',
       },
       { status: 403 },
     );
@@ -293,14 +375,9 @@ export async function verifyOrganiserRequestSecurity(
       securityContext: parsedContext,
       metadata: {
         method: request.method,
-        signature_sha256:
-          typeof parsedContext?.signature_sha256 === 'string'
-            ? normalizeFingerprint(parsedContext.signature_sha256)
-            : null,
-        signature_expected_sha256:
-          typeof parsedContext?.signature_expected_sha256 === 'string'
-            ? normalizeFingerprint(parsedContext.signature_expected_sha256)
-            : null,
+        signature_sha256: runtimeSignature,
+        signature_expected_sha256: clientExpectedSignature,
+        signature_server_expected_sha256: serverExpectedSignature,
       },
     });
 
@@ -316,15 +393,21 @@ export async function verifyOrganiserRequestSecurity(
   if (
     !debugAllowed &&
     !options.allowBlockedDevice &&
-    (isRooted || isJailbroken || hasSuspiciousApps)
+    (isRooted || isJailbroken || hasSuspiciousApps || isTampered)
   ) {
     await flagOrganiserSecurityEvent({
       app: 'organiser',
       request,
       endpoint: request.nextUrl.pathname,
-      flagType: isJailbroken ? 'jailbroken_device' : 'rooted_device',
+      flagType: isJailbroken
+        ? 'jailbroken_device'
+        : isTampered
+          ? 'tampered_runtime'
+          : 'rooted_device',
       reason: hasSuspiciousApps
         ? 'Root or tampering tools were detected on the organiser device.'
+        : isTampered
+          ? 'Runtime tampering signals were detected on the organiser device.'
         : 'A rooted or jailbroken device attempted to use organiser APIs.',
       severity: 'critical',
       shouldBlock: true,
@@ -336,6 +419,7 @@ export async function verifyOrganiserRequestSecurity(
         has_suspicious_apps: hasSuspiciousApps,
         is_rooted: isRooted,
         is_jailbroken: isJailbroken,
+        is_tampered: isTampered,
       },
     });
 

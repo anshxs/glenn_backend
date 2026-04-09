@@ -174,6 +174,7 @@ export async function POST(request: NextRequest) {
 
     const securityError = await verifyOrganiserRequestSecurity(request, {
       bodyText,
+      requireEncryptedPayload: true,
     });
     if (securityError) {
       return securityError;

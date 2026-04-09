@@ -50,6 +50,7 @@ export async function POST(request: NextRequest) {
     const securityError = await verifyOrganiserRequestSecurity(request, {
       bodyText,
       allowBlockedDevice: true,
+      requireEncryptedPayload: true,
     });
     if (securityError) {
       return securityError;
