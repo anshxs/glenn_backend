@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 
 async function verifyToken(authHeader: string | null, supabase: any): Promise<string | null> {
   if (!authHeader?.startsWith('Bearer ')) return null;
@@ -22,7 +26,33 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body = await req.json();
+    let body: Record<string, unknown>;
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<Record<string, unknown>>(req);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(req, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const { transaction_id } = body;
 
     if (!transaction_id) {

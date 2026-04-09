@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 
 const ADD_MONEY_ENABLED = false;
 const ADD_MONEY_DISABLED_MESSAGE =
@@ -42,7 +46,33 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    const body: CreateOrderRequest = await req.json();
+    let body: CreateOrderRequest;
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<CreateOrderRequest>(req);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(req, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const { amount, user_id: requestedUserId, phone } = body;
     const user_id = authenticatedUserId;
 

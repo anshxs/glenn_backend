@@ -101,9 +101,13 @@ function hasOrganiserProbeSignals(request: NextRequest): boolean {
   return Boolean(
     request.headers.get('Authorization')?.startsWith('Bearer ') ||
       request.headers.get('x-organiser-device-id') ||
+      request.headers.get('x-glenn-device-id') ||
       request.headers.get('x-organiser-security-context') ||
+      request.headers.get('x-glenn-security-context') ||
       request.headers.get('x-organiser-signature') ||
-      request.headers.get('x-organiser-timestamp'),
+      request.headers.get('x-glenn-signature') ||
+      request.headers.get('x-organiser-timestamp') ||
+      request.headers.get('x-glenn-timestamp'),
   );
 }
 
@@ -135,7 +139,10 @@ export async function flagOrganiserSecurityEvent({
 }: FlagInput): Promise<void> {
   const parsedContext =
     securityContext ??
-    decodeSecurityContextHeader(request.headers.get('x-organiser-security-context'));
+    decodeSecurityContextHeader(
+      request.headers.get('x-organiser-security-context') ??
+        request.headers.get('x-glenn-security-context'),
+    );
   const actor =
     organiserId ??
     (await verifyBearerToken(request.headers.get('Authorization')))?.id ??
@@ -147,7 +154,10 @@ export async function flagOrganiserSecurityEvent({
       ? parsedContext.session_id
       : null;
   const resolvedDeviceId =
-    deviceId ?? request.headers.get('x-organiser-device-id') ?? contextDeviceId;
+    deviceId ??
+    request.headers.get('x-organiser-device-id') ??
+    request.headers.get('x-glenn-device-id') ??
+    contextDeviceId;
   const resolvedSessionId = sessionId ?? contextSessionId;
   const forensicHeaders = collectForensicHeaders(request);
 
@@ -164,7 +174,9 @@ export async function flagOrganiserSecurityEvent({
     status: 'open',
     ip_address: requestIp(request),
     user_agent: request.headers.get('user-agent'),
-    build_hash: request.headers.get('x-organiser-build-hash'),
+    build_hash:
+      request.headers.get('x-organiser-build-hash') ??
+      request.headers.get('x-glenn-build-hash'),
     platform: readContextString(parsedContext, ['platform']),
     platform_version: readContextString(parsedContext, [
       'platform_version',

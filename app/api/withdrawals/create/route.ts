@@ -1,5 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -16,12 +20,38 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
 
 export async function POST(request: NextRequest) {
   try {
+    let body: Record<string, unknown>;
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<Record<string, unknown>>(request);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(request, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const authenticatedUserId = await verifyToken(request.headers.get('Authorization'));
     if (!authenticatedUserId) {
       return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const body = await request.json() as Record<string, unknown>;
     const requestedUserId =
       typeof body.userId === 'string' ? body.userId : null;
     const amount = body.amount;

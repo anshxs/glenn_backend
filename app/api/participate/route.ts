@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 import { ParticipateRequest, Tournament, Wallet } from '@/lib/types';
 
@@ -87,7 +91,33 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Parse request body
-    const body: ParticipateRequest = await request.json();
+    let body: ParticipateRequest;
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<ParticipateRequest>(request);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(request, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const { amount, user_id, tournament_id, participant_id, team_members, team_name } = body;
     const rawTeamMembers = team_members ?? {};
 

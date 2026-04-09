@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createClient } from '@supabase/supabase-js';
+import { verifyGlennRequestSecurity } from '@/lib/glenn-request-security';
 
 // Route segment config
 export const dynamic = 'force-dynamic';
@@ -103,6 +104,23 @@ function recordUpload(userId: string) {
  */
 export async function POST(request: NextRequest) {
   try {
+    const formData = await request.formData();
+    const file = formData.get('file') as File;
+    const folder = (formData.get('folder') as string) || 'avatars';
+    const requestedUserId = formData.get('userId');
+    const securityBody = JSON.stringify({
+      folder,
+      user_id: typeof requestedUserId === 'string' ? requestedUserId : '',
+      file_name: file?.name ?? '',
+      file_size: file?.size ?? null,
+    });
+    const securityError = await verifyGlennRequestSecurity(request, {
+      bodyText: securityBody,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const authenticatedUserId = await verifyToken(
       request.headers.get('Authorization')
     );
@@ -122,12 +140,6 @@ export async function POST(request: NextRequest) {
         { status: 500 }
       );
     }
-
-    // Parse form data
-    const formData = await request.formData();
-    const file = formData.get('file') as File;
-    const folder = (formData.get('folder') as string) || 'avatars';
-    const requestedUserId = formData.get('userId');
     const userId = authenticatedUserId;
 
     if (
@@ -226,6 +238,11 @@ export async function POST(request: NextRequest) {
  * Get rate limit status for a user
  */
 export async function GET(request: NextRequest) {
+  const securityError = await verifyGlennRequestSecurity(request);
+  if (securityError) {
+    return securityError;
+  }
+
   const authenticatedUserId = await verifyToken(
     request.headers.get('Authorization')
   );

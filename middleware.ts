@@ -47,7 +47,7 @@ function applyApiSecurityHeaders(
   );
   response.headers.set(
     'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context',
+    'Content-Type, Authorization, x-admin-secret, x-organiser-build-hash, x-organiser-timestamp, x-organiser-nonce, x-organiser-signature, x-organiser-payload-mode, x-organiser-device-id, x-organiser-security-context, x-organiser-debug-mode, x-glenn-build-hash, x-glenn-timestamp, x-glenn-signature, x-glenn-payload-mode, x-glenn-device-id, x-glenn-security-context, x-glenn-debug-mode',
   );
   return response;
 }

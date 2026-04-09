@@ -1,4 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 // Route segment config
@@ -29,6 +33,33 @@ async function verifyToken(authHeader: string | null): Promise<string | null> {
 
 export async function POST(request: NextRequest) {
   try {
+    let body: Record<string, unknown> = {};
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<Record<string, unknown>>(request);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(request, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     // 1. Verify authentication
     const authHeader = request.headers.get('Authorization');
     const authenticatedUserId = await verifyToken(authHeader);
@@ -41,7 +72,6 @@ export async function POST(request: NextRequest) {
     }
 
     // 2. Parse request body
-    const body = await request.json() as Record<string, unknown>;
     const requestedFollowerId =
       typeof body.user_id === 'string' ? body.user_id : null;
     const followee_id =

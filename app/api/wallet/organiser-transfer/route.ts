@@ -1,6 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import { verifyBearerToken } from '@/lib/auth';
+import {
+  readGlennJsonBody,
+  verifyGlennRequestSecurity,
+} from '@/lib/glenn-request-security';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
@@ -20,6 +24,11 @@ function wholeRupeeAmount(value: number): number {
 
 export async function GET(request: NextRequest) {
   try {
+    const securityError = await verifyGlennRequestSecurity(request);
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -95,6 +104,33 @@ export async function GET(request: NextRequest) {
 
 export async function POST(request: NextRequest) {
   try {
+    let body: TransferPayload;
+    let bodyText = '';
+    try {
+      const parsed = await readGlennJsonBody<TransferPayload>(request);
+      body = parsed.data;
+      bodyText = parsed.bodyForSignature;
+    } catch (error) {
+      return NextResponse.json(
+        {
+          error: 'Invalid request body',
+          message:
+            error instanceof Error
+              ? error.message
+              : 'Unable to parse Glenn payload.',
+        },
+        { status: 400 }
+      );
+    }
+
+    const securityError = await verifyGlennRequestSecurity(request, {
+      bodyText,
+      requireEncryptedPayload: true,
+    });
+    if (securityError) {
+      return securityError;
+    }
+
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
@@ -102,8 +138,6 @@ export async function POST(request: NextRequest) {
         { status: 401 }
       );
     }
-
-    const body = (await request.json()) as TransferPayload;
     const rawAmount = body.amount;
     const parsedAmount =
       typeof rawAmount === 'number'
