@@ -126,12 +126,16 @@ export async function verifyOrganiserRequestSecurity(
     parsedContext?.is_jailbroken === true || parsedContext?.isJailbroken === true;
   const hasSuspiciousApps =
     parsedContext?.has_suspicious_apps === true ||
-    parsedContext?.hasSuspiciousApps === true;
+    parsedContext?.hasSuspiciousApps === true ||
+    parsedContext?.has_frida_or_hooking === true ||
+    parsedContext?.hasFridaOrHooking === true;
   const isTampered =
     parsedContext?.is_tampered === true || parsedContext?.isTampered === true;
   const isDebuggerAttached =
     parsedContext?.is_debugger_attached === true ||
-    parsedContext?.isDebuggerAttached === true;
+    parsedContext?.isDebuggerAttached === true ||
+    parsedContext?.is_debugged === true ||
+    parsedContext?.isDebugged === true;
   const clientReportedSignatureMismatch =
     parsedContext?.signature_mismatch === true ||
     parsedContext?.signatureMismatch === true ||
@@ -220,6 +224,7 @@ export async function verifyOrganiserRequestSecurity(
       metadata: {
         method: request.method,
         payload_mode: payloadMode || null,
+        build_hash: buildHash,
       },
     });
 
@@ -273,7 +278,11 @@ export async function verifyOrganiserRequestSecurity(
       shouldBlock: true,
       deviceId,
       securityContext: parsedContext,
-      metadata: { method: request.method, has_timestamp: !!timestamp },
+      metadata: {
+        method: request.method,
+        has_timestamp: !!timestamp,
+        build_hash: buildHash,
+      },
     });
 
     if (!allowUnsigned) {
@@ -307,6 +316,7 @@ export async function verifyOrganiserRequestSecurity(
           method: request.method,
           timestamp,
           now,
+          build_hash: buildHash,
         },
       });
 
@@ -345,6 +355,7 @@ export async function verifyOrganiserRequestSecurity(
         metadata: {
           method: request.method,
           timestamp,
+          build_hash: buildHash,
         },
       });
 
@@ -378,6 +389,7 @@ export async function verifyOrganiserRequestSecurity(
         signature_sha256: runtimeSignature,
         signature_expected_sha256: clientExpectedSignature,
         signature_server_expected_sha256: serverExpectedSignature,
+        build_hash: buildHash,
       },
     });
 
@@ -420,6 +432,7 @@ export async function verifyOrganiserRequestSecurity(
         is_rooted: isRooted,
         is_jailbroken: isJailbroken,
         is_tampered: isTampered,
+        build_hash: buildHash,
       },
     });
 

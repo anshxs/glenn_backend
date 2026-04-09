@@ -26,6 +26,23 @@ interface OrganiserRequestRow {
   updated_at: string;
 }
 
+const MAX_AADHAR_UPLOAD_BYTES = 8 * 1024 * 1024;
+const ALLOWED_AADHAR_EXTENSIONS = new Set([
+  'jpg',
+  'jpeg',
+  'png',
+  'webp',
+  'heic',
+  'heif',
+]);
+const ALLOWED_AADHAR_MIME_TYPES = new Set([
+  'image/jpeg',
+  'image/png',
+  'image/webp',
+  'image/heic',
+  'image/heif',
+]);
+
 function badRequest(message: string) {
   return NextResponse.json({ error: message }, { status: 400 });
 }
@@ -33,6 +50,12 @@ function badRequest(message: string) {
 function parseBoolean(v: FormDataEntryValue | null): boolean {
   if (!v) return false;
   return String(v).toLowerCase() === 'true';
+}
+
+function fileExtension(name: string): string {
+  const trimmed = name.trim().toLowerCase();
+  const dotIndex = trimmed.lastIndexOf('.');
+  return dotIndex >= 0 ? trimmed.slice(dotIndex + 1) : '';
 }
 
 export async function GET(request: NextRequest) {
@@ -80,6 +103,8 @@ export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
     const aadharFile = formData.get('aadhar_file');
+    const aadharFileName = aadharFile instanceof File ? aadharFile.name : '';
+    const aadharFileExtension = fileExtension(aadharFileName);
     const securityBody = JSON.stringify({
       name: String(formData.get('name') ?? '').trim(),
       contact_number: String(formData.get('contact_number') ?? '').trim(),
@@ -89,6 +114,8 @@ export async function POST(request: NextRequest) {
       is_reappeal: String(formData.get('is_reappeal') ?? '').trim(),
       reappeal_of: String(formData.get('reappeal_of') ?? '').trim(),
       has_aadhar_file: aadharFile instanceof File,
+      aadhar_file_name: aadharFileName,
+      aadhar_file_extension: aadharFileExtension,
       aadhar_file_size: aadharFile instanceof File ? aadharFile.size : null,
     });
     const securityError = await verifyOrganiserRequestSecurity(request, {
@@ -181,6 +208,22 @@ export async function POST(request: NextRequest) {
     let aadharCardUrl: string | null = null;
 
     if (aadharFile && aadharFile instanceof File && aadharFile.size > 0) {
+      const mimeType = aadharFile.type.trim().toLowerCase();
+      if (
+        aadharFile.size > MAX_AADHAR_UPLOAD_BYTES
+      ) {
+        return badRequest('Aadhar image must be 8 MB or smaller');
+      }
+
+      if (
+        !ALLOWED_AADHAR_EXTENSIONS.has(aadharFileExtension) &&
+        !ALLOWED_AADHAR_MIME_TYPES.has(mimeType)
+      ) {
+        return badRequest(
+          'Only JPG, PNG, WEBP, HEIC, or HEIF Aadhar images are allowed',
+        );
+      }
+
       const upload = await uploadToImageKit({
         file: aadharFile,
         folder: '/organiser-aadhar',
