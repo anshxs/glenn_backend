@@ -38,12 +38,14 @@ function chooseStatusRpc(placement: GemRewardPlacement): string {
 export async function createRewardedClaimSession({
   userId,
   placement,
+  preferStartIo = false,
   deviceId,
   buildHash,
   securityContext,
 }: {
   userId: string;
   placement: GemRewardPlacement;
+  preferStartIo?: boolean;
   deviceId: string | null;
   buildHash: string | null;
   securityContext: string | null;
@@ -62,8 +64,8 @@ export async function createRewardedClaimSession({
     .order('created_at', { ascending: false })
     .limit(10);
 
-  const internalAd =
-    internalAds?.find((candidate) => {
+  const eligibleInternalAds =
+    internalAds?.filter((candidate) => {
       const startsAt = candidate.starts_at
         ? new Date(candidate.starts_at).getTime()
         : null;
@@ -77,19 +79,28 @@ export async function createRewardedClaimSession({
       const beforeEnd = endsAt == null || endsAt >= now.getTime();
 
       return placementMatches && afterStart && beforeEnd;
-    }) ?? null;
+    }) ?? [];
 
-  const provider: RewardedProvider = internalAd ? 'internal' : 'startio';
-  const snapshot = internalAd
+  const internalAd =
+    eligibleInternalAds.length > 0
+      ? eligibleInternalAds[
+          Math.floor(Math.random() * eligibleInternalAds.length)
+        ] ?? null
+      : null;
+
+  const provider: RewardedProvider =
+    preferStartIo ? 'startio' : internalAd ? 'internal' : 'startio';
+  const selectedInternalAd = provider === 'internal' ? internalAd : null;
+  const snapshot = selectedInternalAd
     ? {
-        id: internalAd.id,
-        title: internalAd.title,
-        body: internalAd.body,
-        image_url: internalAd.image_url,
-        video_url: internalAd.video_url,
-        click_url: internalAd.click_url,
-        cta_text: internalAd.cta_text,
-        metadata: internalAd.metadata ?? {},
+        id: selectedInternalAd.id,
+        title: selectedInternalAd.title,
+        body: selectedInternalAd.body,
+        image_url: selectedInternalAd.image_url,
+        video_url: selectedInternalAd.video_url,
+        click_url: selectedInternalAd.click_url,
+        cta_text: selectedInternalAd.cta_text,
+        metadata: selectedInternalAd.metadata ?? {},
       }
     : {};
 
@@ -99,10 +110,10 @@ export async function createRewardedClaimSession({
       user_id: userId,
       placement,
       provider,
-      ad_id: internalAd?.id ?? null,
+      ad_id: selectedInternalAd?.id ?? null,
       session_token: crypto.randomUUID(),
       status: 'issued',
-      required_view_seconds: internalAd?.min_view_seconds ?? 0,
+      required_view_seconds: selectedInternalAd?.min_view_seconds ?? 0,
       security_context: {
         device_id: deviceId,
         build_hash: buildHash,

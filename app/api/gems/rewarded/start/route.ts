@@ -15,6 +15,7 @@ export const runtime = 'nodejs';
 
 type StartBody = {
   placement: GemRewardPlacement;
+  startio_enabled?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -22,7 +23,10 @@ export async function POST(request: NextRequest) {
     const user = await verifyBearerToken(request.headers.get('Authorization'));
     if (!user) {
       return NextResponse.json(
-        { error: 'Unauthorized', message: 'Invalid or missing authentication token' },
+        {
+          error: 'Unauthorized',
+          message: 'Invalid or missing authentication token',
+        },
         { status: 401 },
       );
     }
@@ -37,9 +41,13 @@ export async function POST(request: NextRequest) {
     }
 
     const placement = parsed.data.placement;
+    const startioEnabled = parsed.data.startio_enabled === true;
     if (placement !== 'daily_gem_checkin' && placement !== 'sunday_spin') {
       return NextResponse.json(
-        { error: 'Invalid placement', message: 'Unsupported rewarded ad placement.' },
+        {
+          error: 'Invalid placement',
+          message: 'Unsupported rewarded ad placement.',
+        },
         { status: 400 },
       );
     }
@@ -47,6 +55,7 @@ export async function POST(request: NextRequest) {
     const result = await createRewardedClaimSession({
       userId: user.id,
       placement,
+      preferStartIo: startioEnabled,
       deviceId: request.headers.get('x-glenn-device-id'),
       buildHash: request.headers.get('x-glenn-build-hash'),
       securityContext: request.headers.get('x-glenn-security-context'),
@@ -59,7 +68,8 @@ export async function POST(request: NextRequest) {
         placement: result.session.placement,
         provider: result.session.provider,
         required_view_seconds: result.session.required_view_seconds,
-        internal_ad: result.session.provider === 'internal'
+        internal_ad:
+          result.session.provider === 'internal'
             ? result.session.ad_payload_snapshot
             : null,
       },
@@ -68,7 +78,10 @@ export async function POST(request: NextRequest) {
     return NextResponse.json(
       {
         error: 'Rewarded session failed',
-        message: error instanceof Error ? error.message : 'Unable to create rewarded session.',
+        message:
+          error instanceof Error
+            ? error.message
+            : 'Unable to create rewarded session.',
       },
       { status: 500 },
     );
