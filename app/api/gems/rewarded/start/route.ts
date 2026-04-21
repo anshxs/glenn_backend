@@ -40,7 +40,11 @@ export async function POST(request: NextRequest) {
     }
 
     const placement = parsed.data.placement;
-    if (placement !== 'daily_gem_checkin' && placement !== 'sunday_spin') {
+    if (
+      placement !== 'daily_gem_checkin' &&
+      placement !== 'sunday_spin' &&
+      placement !== 'quiz_reward'
+    ) {
       return NextResponse.json(
         {
           error: 'Invalid placement',

@@ -2,7 +2,10 @@ import crypto from 'crypto';
 
 import { supabaseAdmin } from '@/lib/supabase';
 
-export type GemRewardPlacement = 'daily_gem_checkin' | 'sunday_spin';
+export type GemRewardPlacement =
+  | 'daily_gem_checkin'
+  | 'sunday_spin'
+  | 'quiz_reward';
 export type RewardedProvider = 'internal';
 
 export type RewardedSessionRow = {
@@ -30,9 +33,13 @@ function nowIso(): string {
 }
 
 function chooseStatusRpc(placement: GemRewardPlacement): string {
-  return placement === 'daily_gem_checkin'
-    ? 'claim_daily_gem_checkin_for_user'
-    : 'claim_sunday_gem_spin_for_user';
+  if (placement === 'daily_gem_checkin') {
+    return 'claim_daily_gem_checkin_for_user';
+  }
+  if (placement === 'sunday_spin') {
+    return 'claim_sunday_gem_spin_for_user';
+  }
+  throw new Error(`No direct reward RPC is configured for ${placement}`);
 }
 
 export async function createRewardedClaimSession({
@@ -279,6 +286,111 @@ export async function finalizeRewardedClaim({
       })
       .eq('id', session.id);
     throw new Error(claimError?.message ?? 'Unable to finalize gem claim');
+  }
+
+  const { error: claimedUpdateError } = await supabaseAdmin
+    .from('rewarded_ad_claim_sessions')
+    .update({
+      status: 'claimed',
+      claimed_at: nowIso(),
+    })
+    .eq('id', session.id);
+
+  if (claimedUpdateError) {
+    throw new Error(claimedUpdateError.message);
+  }
+
+  return claimData as Record<string, unknown>;
+}
+
+export async function finalizeQuizRewardClaim({
+  userId,
+  sessionId,
+  sessionToken,
+  quizId,
+  selectedOptionIndex,
+}: {
+  userId: string;
+  sessionId: string;
+  sessionToken: string;
+  quizId: string;
+  selectedOptionIndex: number;
+}): Promise<Record<string, unknown>> {
+  const { data: session, error: fetchError } = await supabaseAdmin
+    .from('rewarded_ad_claim_sessions')
+    .select(
+      'id, user_id, placement, provider, ad_id, session_token, status, required_view_seconds, opened_at, completed_at, claimed_at, expires_at, ad_payload_snapshot',
+    )
+    .eq('id', sessionId)
+    .eq('user_id', userId)
+    .eq('session_token', sessionToken)
+    .maybeSingle<RewardedSessionRow>();
+
+  if (fetchError || !session) {
+    throw new Error('Rewarded ad session not found');
+  }
+
+  if (session.placement !== 'quiz_reward') {
+    throw new Error('Rewarded ad placement mismatch');
+  }
+
+  if (session.claimed_at || session.status === 'claimed') {
+    throw new Error('Rewarded ad session already consumed');
+  }
+
+  if (new Date(session.expires_at).getTime() <= Date.now()) {
+    await supabaseAdmin
+      .from('rewarded_ad_claim_sessions')
+      .update({ status: 'expired', failure_reason: 'session_expired' })
+      .eq('id', session.id);
+    throw new Error('Rewarded ad session expired');
+  }
+
+  if (!session.opened_at) {
+    throw new Error('Internal rewarded ad was not opened');
+  }
+
+  const openedAtMs = new Date(session.opened_at).getTime();
+  const minElapsedMs = (session.required_view_seconds ?? 0) * 1000;
+  if (Date.now() - openedAtMs < minElapsedMs) {
+    throw new Error('Internal rewarded ad has not been viewed long enough');
+  }
+
+  const completedAt = nowIso();
+
+  const { error: sessionUpdateError } = await supabaseAdmin
+    .from('rewarded_ad_claim_sessions')
+    .update({
+      status: 'completed',
+      completed_at: completedAt,
+    })
+    .eq('id', session.id)
+    .eq('user_id', userId)
+    .eq('session_token', sessionToken)
+    .in('status', ['issued', 'opened']);
+
+  if (sessionUpdateError) {
+    throw new Error(sessionUpdateError.message);
+  }
+
+  const { data: claimData, error: claimError } = await supabaseAdmin.rpc(
+    'submit_app_quiz_response_for_user',
+    {
+      p_user_id: userId,
+      p_quiz_id: quizId,
+      p_selected_option_index: selectedOptionIndex,
+    },
+  );
+
+  if (claimError || !claimData) {
+    await supabaseAdmin
+      .from('rewarded_ad_claim_sessions')
+      .update({
+        status: 'failed',
+        failure_reason: claimError?.message ?? 'quiz_claim_failed',
+      })
+      .eq('id', session.id);
+    throw new Error(claimError?.message ?? 'Unable to finalize quiz claim');
   }
 
   const { error: claimedUpdateError } = await supabaseAdmin
