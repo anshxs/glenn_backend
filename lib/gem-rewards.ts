@@ -3,7 +3,7 @@ import crypto from 'crypto';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export type GemRewardPlacement = 'daily_gem_checkin' | 'sunday_spin';
-export type RewardedProvider = 'startio' | 'internal';
+export type RewardedProvider = 'internal';
 
 export type RewardedSessionRow = {
   id: string;
@@ -38,14 +38,12 @@ function chooseStatusRpc(placement: GemRewardPlacement): string {
 export async function createRewardedClaimSession({
   userId,
   placement,
-  preferStartIo = false,
   deviceId,
   buildHash,
   securityContext,
 }: {
   userId: string;
   placement: GemRewardPlacement;
-  preferStartIo?: boolean;
   deviceId: string | null;
   buildHash: string | null;
   securityContext: string | null;
@@ -88,19 +86,22 @@ export async function createRewardedClaimSession({
         ] ?? null
       : null;
 
-  const provider: RewardedProvider =
-    preferStartIo ? 'startio' : internalAd ? 'internal' : 'startio';
-  const selectedInternalAd = provider === 'internal' ? internalAd : null;
-  const snapshot = selectedInternalAd
+  if (!internalAd) {
+    throw new Error(`No active Glenn rewarded ad configured for ${placement}`);
+  }
+
+  const provider: RewardedProvider = 'internal';
+  const snapshot =
+    internalAd
     ? {
-        id: selectedInternalAd.id,
-        title: selectedInternalAd.title,
-        body: selectedInternalAd.body,
-        image_url: selectedInternalAd.image_url,
-        video_url: selectedInternalAd.video_url,
-        click_url: selectedInternalAd.click_url,
-        cta_text: selectedInternalAd.cta_text,
-        metadata: selectedInternalAd.metadata ?? {},
+        id: internalAd.id,
+        title: internalAd.title,
+        body: internalAd.body,
+        image_url: internalAd.image_url,
+        video_url: internalAd.video_url,
+        click_url: internalAd.click_url,
+        cta_text: internalAd.cta_text,
+        metadata: internalAd.metadata ?? {},
       }
     : {};
 
@@ -110,10 +111,10 @@ export async function createRewardedClaimSession({
       user_id: userId,
       placement,
       provider,
-      ad_id: selectedInternalAd?.id ?? null,
+      ad_id: internalAd.id,
       session_token: crypto.randomUUID(),
       status: 'issued',
-      required_view_seconds: selectedInternalAd?.min_view_seconds ?? 0,
+      required_view_seconds: internalAd.min_view_seconds ?? 0,
       security_context: {
         device_id: deviceId,
         build_hash: buildHash,

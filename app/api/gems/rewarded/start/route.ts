@@ -15,7 +15,6 @@ export const runtime = 'nodejs';
 
 type StartBody = {
   placement: GemRewardPlacement;
-  startio_enabled?: boolean;
 };
 
 export async function POST(request: NextRequest) {
@@ -41,7 +40,6 @@ export async function POST(request: NextRequest) {
     }
 
     const placement = parsed.data.placement;
-    const startioEnabled = parsed.data.startio_enabled === true;
     if (placement !== 'daily_gem_checkin' && placement !== 'sunday_spin') {
       return NextResponse.json(
         {
@@ -55,7 +53,6 @@ export async function POST(request: NextRequest) {
     const result = await createRewardedClaimSession({
       userId: user.id,
       placement,
-      preferStartIo: startioEnabled,
       deviceId: request.headers.get('x-glenn-device-id'),
       buildHash: request.headers.get('x-glenn-build-hash'),
       securityContext: request.headers.get('x-glenn-security-context'),
