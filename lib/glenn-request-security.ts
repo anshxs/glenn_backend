@@ -73,18 +73,8 @@ function normalizeFingerprint(value: string | null | undefined): string | null {
   return normalized ? normalized : null;
 }
 
-function getExpectedGlennReleaseFingerprints(): string[] {
-  const configured = [
-    process.env.GLENN_RELEASE_SIGNING_CERT_SHA256_LIST,
-    process.env.GLENN_SIGNING_CERT_SHA256_LIST,
-    process.env.GLENN_RELEASE_SIGNING_CERT_SHA256,
-    process.env.GLENN_SIGNING_CERT_SHA256,
-  ]
-    .flatMap((value) => (value ?? '').split(','))
-    .map((value) => normalizeFingerprint(value))
-    .filter((value): value is string => !!value);
-
-  return Array.from(new Set(configured));
+function getExpectedGlennReleaseFingerprint(): string | null {
+  return normalizeFingerprint(process.env.GLENN_RELEASE_SIGNING_CERT_SHA256 ?? process.env.GLENN_SIGNING_CERT_SHA256 ?? null);
 }
 
 function isSupportedBuildHashValue(buildHash: string | null | undefined): boolean {
@@ -161,15 +151,14 @@ export async function verifyGlennRequestSecurity(
       ? parsedContext.signature_expected_sha256
       : null,
   );
-  const serverExpectedSignatures = getExpectedGlennReleaseFingerprints();
-  const serverExpectedSignature = serverExpectedSignatures[0] ?? null;
+  const serverExpectedSignature = getExpectedGlennReleaseFingerprint();
   const signatureExpectedMismatch =
-    serverExpectedSignatures.length > 0 &&
+    !!serverExpectedSignature &&
     !!clientExpectedSignature &&
-    !serverExpectedSignatures.includes(clientExpectedSignature);
+    serverExpectedSignature !== clientExpectedSignature;
   const serverDetectedSignatureMismatch =
-    serverExpectedSignatures.length > 0 &&
-    (!runtimeSignature || !serverExpectedSignatures.includes(runtimeSignature));
+    !!serverExpectedSignature &&
+    (!runtimeSignature || runtimeSignature !== serverExpectedSignature);
   const signatureMismatch =
     clientReportedSignatureMismatch ||
     signatureExpectedMismatch ||
@@ -202,7 +191,7 @@ export async function verifyGlennRequestSecurity(
   if (
     !debugAllowed &&
     process.env.NODE_ENV !== 'development' &&
-    serverExpectedSignatures.length === 0
+    !serverExpectedSignature
   ) {
     return NextResponse.json(
       {
@@ -396,7 +385,6 @@ export async function verifyGlennRequestSecurity(
         signature_sha256: runtimeSignature,
         signature_expected_sha256: clientExpectedSignature,
         signature_server_expected_sha256: serverExpectedSignature,
-        signature_server_expected_sha256_list: serverExpectedSignatures,
         build_hash: buildHash,
       },
     });
