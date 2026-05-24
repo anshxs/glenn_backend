@@ -39,7 +39,7 @@ export async function POST(request: NextRequest) {
     }
 
     const placement = parsed.data.placement;
-    if (placement !== 'daily_gem_checkin' && placement !== 'sunday_spin') {
+    if (placement !== 'daily_gem_checkin') {
       return NextResponse.json(
         { error: 'Invalid placement', message: 'Unsupported rewarded ad placement.' },
         { status: 400 },

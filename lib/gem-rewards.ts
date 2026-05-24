@@ -4,7 +4,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export type GemRewardPlacement =
   | 'daily_gem_checkin'
-  | 'sunday_spin'
   | 'quiz_reward';
 export type RewardedProvider = 'internal';
 
@@ -35,9 +34,6 @@ function nowIso(): string {
 function chooseStatusRpc(placement: GemRewardPlacement): string {
   if (placement === 'daily_gem_checkin') {
     return 'claim_daily_gem_checkin_for_user';
-  }
-  if (placement === 'sunday_spin') {
-    return 'claim_sunday_gem_spin_for_user';
   }
   throw new Error(`No direct reward RPC is configured for ${placement}`);
 }
