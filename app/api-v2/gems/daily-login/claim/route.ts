@@ -29,6 +29,13 @@ export async function POST(request: NextRequest) {
       return securityError;
     }
 
+    if (Object.keys(parsed.data as Record<string, unknown>).length > 0) {
+      return NextResponse.json(
+        { error: 'Invalid request', message: 'This endpoint accepts no fields.' },
+        { status: 400 },
+      );
+    }
+
     const maintenanceResponse = await blockApiV2IfMaintenance();
     if (maintenanceResponse) {
       return maintenanceResponse;

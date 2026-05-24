@@ -101,13 +101,20 @@ function hasOrganiserProbeSignals(request: NextRequest): boolean {
   return Boolean(
     request.headers.get('Authorization')?.startsWith('Bearer ') ||
       request.headers.get('x-organiser-device-id') ||
-      request.headers.get('x-glenn-device-id') ||
       request.headers.get('x-organiser-security-context') ||
-      request.headers.get('x-glenn-security-context') ||
       request.headers.get('x-organiser-signature') ||
+      request.headers.get('x-organiser-timestamp'),
+  );
+}
+
+function hasGlennProbeSignals(request: NextRequest): boolean {
+  return Boolean(
+    request.headers.get('Authorization')?.startsWith('Bearer ') ||
+      request.headers.get('x-glenn-device-id') ||
+      request.headers.get('x-glenn-security-context') ||
       request.headers.get('x-glenn-signature') ||
-      request.headers.get('x-organiser-timestamp') ||
-      request.headers.get('x-glenn-timestamp'),
+      request.headers.get('x-glenn-timestamp') ||
+      request.nextUrl.pathname.startsWith('/api-v2/'),
   );
 }
 
@@ -253,25 +260,30 @@ export async function handleHoneypotRequest(
   endpoint: string,
 ): Promise<NextResponse> {
   const organiserProbe = hasOrganiserProbeSignals(request);
+  const glennProbe = !organiserProbe && hasGlennProbeSignals(request);
+  const app = organiserProbe ? 'organiser' : glennProbe ? 'glenn' : 'backend';
+  const flaggedProbe = organiserProbe || glennProbe;
+
   await flagOrganiserSecurityEvent({
-    app: organiserProbe ? 'organiser' : 'backend',
+    app,
     request,
     endpoint,
-    flagType: organiserProbe ? 'organiser_honeypot_access' : 'honeypot_hit',
-    reason: organiserProbe
-      ? `An organiser-authenticated probe touched honeypot endpoint: ${endpoint}`
+    flagType: flaggedProbe ? `${app}_honeypot_access` : 'honeypot_hit',
+    reason: flaggedProbe
+      ? `An ${app}-identified probe touched honeypot endpoint: ${endpoint}`
       : `Honeypot endpoint accessed: ${endpoint}`,
-    severity: organiserProbe ? 'critical' : 'high',
-    shouldBlock: organiserProbe,
+    severity: flaggedProbe ? 'critical' : 'high',
+    shouldBlock: flaggedProbe,
     metadata: {
       method: request.method,
       search: request.nextUrl.search,
       had_authorization: request.headers.get('Authorization')?.startsWith('Bearer ') === true,
       had_organiser_headers: organiserProbe,
+      had_glenn_headers: glennProbe,
     },
   });
 
-  if (organiserProbe) {
+  if (flaggedProbe) {
     return NextResponse.json(honeypotPayload(endpoint), { status: 200 });
   }
 

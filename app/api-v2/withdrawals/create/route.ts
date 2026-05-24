@@ -25,11 +25,24 @@ type CreateWithdrawalBody = {
   accountDetails?: unknown;
 };
 
+const ALLOWED_BODY_KEYS = new Set([
+  'userId',
+  'amount',
+  'withdrawalMethod',
+  'accountDetails',
+]);
+
 function isWithdrawalMethod(value: unknown): value is WithdrawalMethod {
   return (
     typeof value === 'string' &&
     VALID_WITHDRAWAL_METHODS.includes(value as WithdrawalMethod)
   );
+}
+
+function textField(value: unknown, maxLength: number): string {
+  if (typeof value !== 'string') return '';
+  const text = value.trim();
+  return text.length <= maxLength ? text : '';
 }
 
 function nextWorkingDay(): Date {
@@ -87,6 +100,17 @@ export async function POST(request: NextRequest) {
     }
 
     const requestedUserId = typeof body.userId === 'string' ? body.userId : null;
+    if (
+      !Object.keys(body as Record<string, unknown>).every((key) =>
+        ALLOWED_BODY_KEYS.has(key),
+      )
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid request', message: 'Unsupported withdrawal fields.' },
+        { status: 400 },
+      );
+    }
+
     if (requestedUserId !== null && requestedUserId !== auth.user.id) {
       return NextResponse.json(
         {
@@ -117,7 +141,12 @@ export async function POST(request: NextRequest) {
         ? body.amount
         : Number.parseFloat(body.amount);
 
-    if (Number.isNaN(withdrawAmount) || withdrawAmount < 1) {
+    if (
+      Number.isNaN(withdrawAmount) ||
+      !Number.isFinite(withdrawAmount) ||
+      withdrawAmount < 1 ||
+      withdrawAmount > 50000
+    ) {
       return NextResponse.json(
         {
           error: 'Invalid amount',
@@ -130,8 +159,37 @@ export async function POST(request: NextRequest) {
     const withdrawalMethod = body.withdrawalMethod;
     const accountDetails =
       body.accountDetails && typeof body.accountDetails === 'object'
-        ? body.accountDetails
+        ? (body.accountDetails as Record<string, unknown>)
         : {};
+
+    if (withdrawalMethod === 'UPI' && !textField(accountDetails.upiId, 80)) {
+      return NextResponse.json(
+        { error: 'Invalid UPI', message: 'Enter a valid UPI ID.' },
+        { status: 400 },
+      );
+    }
+
+    if (
+      withdrawalMethod === 'BANK' &&
+      (!textField(accountDetails.accountNumber, 40) ||
+        !textField(accountDetails.ifscCode, 20) ||
+        !textField(accountDetails.accountHolderName, 100))
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid bank details', message: 'Enter valid bank details.' },
+        { status: 400 },
+      );
+    }
+
+    if (
+      withdrawalMethod === 'GIFTCARD' &&
+      textField(accountDetails.giftCardType, 80) !== 'Google Play'
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid gift card', message: 'Only Google Play redemption is supported.' },
+        { status: 400 },
+      );
+    }
     const totalDeduction = withdrawAmount + PLATFORM_FEE;
 
     const { data: wallet, error: walletError } = await supabaseAdmin
@@ -226,22 +284,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { error: updateError } = await supabaseAdmin
+    const { data: updatedWallet, error: updateError } = await supabaseAdmin
       .from('wallets')
       .update({
         balance: Number(wallet.balance) - totalDeduction,
         last_updated: new Date().toISOString(),
       })
-      .eq('id', wallet.id);
+      .eq('id', wallet.id)
+      .gte('balance', totalDeduction)
+      .select('balance')
+      .maybeSingle();
 
-    if (updateError) {
+    if (updateError || !updatedWallet) {
       console.error('API v2 wallet update error:', updateError);
       await supabaseAdmin.from('transactions').delete().eq('id', transaction.id);
 
       return NextResponse.json(
         {
           error: 'Wallet update failed',
-          message: updateError.message || 'Failed to update wallet balance.',
+          message: updateError?.message || 'Failed to update wallet balance.',
         },
         { status: 500 },
       );
@@ -259,6 +320,7 @@ export async function POST(request: NextRequest) {
         withdrawalMethod,
         expectedPayoutDate: expectedPayoutDate.toISOString(),
         status: 'PENDING',
+        remainingBalance: Number(updatedWallet.balance),
       },
       message: `Withdrawal request submitted successfully. You will receive ₹${withdrawAmount} within 1 working day.`,
     });

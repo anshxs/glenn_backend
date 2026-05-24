@@ -22,8 +22,23 @@ type CreateOrderBody = {
   userNote?: unknown;
 };
 
+const UUID_RE =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const ALLOWED_BODY_KEYS = new Set([
+  'productId',
+  'quantity',
+  'name',
+  'phone',
+  'shippingAddress',
+  'userNote',
+]);
+
 function cleanText(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function hasOnlyAllowedKeys(value: Record<string, unknown>): boolean {
+  return Object.keys(value).every((key) => ALLOWED_BODY_KEYS.has(key));
 }
 
 export async function POST(request: NextRequest) {
@@ -51,16 +66,39 @@ export async function POST(request: NextRequest) {
     const shippingAddress = cleanText(parsed.data.shippingAddress);
     const userNote = cleanText(parsed.data.userNote);
 
-    if (!productId || !Number.isInteger(quantity) || quantity <= 0) {
+    if (!hasOnlyAllowedKeys(parsed.data as Record<string, unknown>)) {
+      return NextResponse.json(
+        { error: 'Invalid request', message: 'Unsupported order fields.' },
+        { status: 400 },
+      );
+    }
+
+    if (
+      !UUID_RE.test(productId) ||
+      !Number.isInteger(quantity) ||
+      quantity <= 0 ||
+      quantity > 10
+    ) {
       return NextResponse.json(
         { error: 'Invalid order', message: 'Select a valid product quantity.' },
         { status: 400 },
       );
     }
 
-    if (!name || !phone || !shippingAddress) {
+    if (
+      !name ||
+      !phone ||
+      !shippingAddress ||
+      name.length > 80 ||
+      phone.length > 20 ||
+      shippingAddress.length > 500 ||
+      userNote.length > 300
+    ) {
       return NextResponse.json(
-        { error: 'Missing details', message: 'Name, phone and address are required.' },
+        {
+          error: 'Invalid details',
+          message: 'Enter valid name, phone and address details.',
+        },
         { status: 400 },
       );
     }
@@ -73,7 +111,10 @@ export async function POST(request: NextRequest) {
 
     if (productError || !product || product.is_active !== true) {
       return NextResponse.json(
-        { error: 'Product unavailable', message: 'This product is not available.' },
+        {
+          error: 'Product unavailable',
+          message: 'This product is not available.',
+        },
         { status: 404 },
       );
     }
@@ -99,6 +140,12 @@ export async function POST(request: NextRequest) {
     }
 
     const amountPaid = Number(product.selling_price) * quantity;
+    if (!Number.isFinite(amountPaid) || amountPaid <= 0) {
+      return NextResponse.json(
+        { error: 'Invalid product price', message: 'Product price is invalid.' },
+        { status: 400 },
+      );
+    }
 
     const { data: wallet, error: walletError } = await supabaseAdmin
       .from('wallets')
@@ -123,6 +170,55 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    const { data: updatedWallet, error: walletUpdateError } =
+      await supabaseAdmin
+        .from('wallets')
+        .update({
+          balance: Number(wallet.balance) - amountPaid,
+          last_updated: new Date().toISOString(),
+        })
+        .eq('id', wallet.id)
+        .gte('balance', amountPaid)
+        .select('balance')
+        .maybeSingle();
+
+    if (walletUpdateError || !updatedWallet) {
+      return NextResponse.json(
+        {
+          error: 'Payment failed',
+          message: 'Wallet balance is not enough for this order.',
+        },
+        { status: 400 },
+      );
+    }
+
+    const { data: updatedProduct, error: stockUpdateError } =
+      await supabaseAdmin
+        .from('products')
+        .update({ stock: Number(product.stock) - quantity })
+        .eq('id', productId)
+        .gte('stock', quantity)
+        .select('stock')
+        .maybeSingle();
+
+    if (stockUpdateError || !updatedProduct) {
+      await supabaseAdmin
+        .from('wallets')
+        .update({
+          balance: Number(updatedWallet.balance) + amountPaid,
+          last_updated: new Date().toISOString(),
+        })
+        .eq('id', wallet.id);
+
+      return NextResponse.json(
+        {
+          error: 'Out of stock',
+          message: 'This product just went out of stock.',
+        },
+        { status: 400 },
+      );
+    }
+
     const { data: order, error: orderError } = await supabaseAdmin
       .from('orders')
       .insert({
@@ -140,6 +236,18 @@ export async function POST(request: NextRequest) {
       .single();
 
     if (orderError || !order) {
+      await supabaseAdmin
+        .from('wallets')
+        .update({
+          balance: Number(updatedWallet.balance) + amountPaid,
+          last_updated: new Date().toISOString(),
+        })
+        .eq('id', wallet.id);
+      await supabaseAdmin
+        .from('products')
+        .update({ stock: Number(updatedProduct.stock) + quantity })
+        .eq('id', productId);
+
       return NextResponse.json(
         {
           error: 'Order failed',
@@ -149,37 +257,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { error: walletUpdateError } = await supabaseAdmin
-      .from('wallets')
-      .update({
-        balance: Number(wallet.balance) - amountPaid,
-        last_updated: new Date().toISOString(),
-      })
-      .eq('id', wallet.id);
-
-    if (walletUpdateError) {
-      await supabaseAdmin.from('orders').delete().eq('id', order.id);
-      return NextResponse.json(
-        {
-          error: 'Payment failed',
-          message: walletUpdateError.message || 'Could not deduct wallet balance.',
-        },
-        { status: 500 },
-      );
-    }
-
-    await supabaseAdmin
-      .from('products')
-      .update({ stock: Number(product.stock) - quantity })
-      .eq('id', productId);
-
     return NextResponse.json({
       apiVersion: 'v2',
       authenticated: true,
       data: {
         order,
         product_name: product.name,
-        remaining_balance: Number(wallet.balance) - amountPaid,
+        remaining_balance: Number(updatedWallet.balance),
       },
     });
   } catch (error) {

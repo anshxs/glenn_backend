@@ -17,6 +17,8 @@ type ConvertGemsBody = {
   gems?: unknown;
 };
 
+const ALLOWED_BODY_KEYS = new Set(['gems']);
+
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireApiV2Auth(request);
@@ -31,6 +33,17 @@ export async function POST(request: NextRequest) {
 
     const maintenanceResponse = await blockApiV2IfMaintenance();
     if (maintenanceResponse) return maintenanceResponse;
+
+    if (
+      !Object.keys(parsed.data as Record<string, unknown>).every((key) =>
+        ALLOWED_BODY_KEYS.has(key),
+      )
+    ) {
+      return NextResponse.json(
+        { error: 'Invalid request', message: 'Unsupported conversion fields.' },
+        { status: 400 },
+      );
+    }
 
     const gems =
       typeof parsed.data.gems === 'number'
@@ -89,20 +102,24 @@ export async function POST(request: NextRequest) {
     const newBalance = oldBalance + moneyAdded;
     const newCoins = Number(wallet.coins) - gems;
 
-    const { error: updateError } = await supabaseAdmin
+    const { data: updatedWallet, error: updateError } = await supabaseAdmin
       .from('wallets')
       .update({
         balance: newBalance,
         coins: newCoins,
         last_updated: new Date().toISOString(),
       })
-      .eq('id', wallet.id);
+      .eq('id', wallet.id)
+      .gte('coins', gems)
+      .eq('allow_deposits', true)
+      .select('balance, coins')
+      .maybeSingle();
 
-    if (updateError) {
+    if (updateError || !updatedWallet) {
       return NextResponse.json(
         {
           error: 'Conversion failed',
-          message: updateError.message || 'Unable to update wallet.',
+          message: updateError?.message || 'Unable to update wallet.',
         },
         { status: 500 },
       );
@@ -116,14 +133,14 @@ export async function POST(request: NextRequest) {
         amount: moneyAdded,
         transaction_type: 'GEM_TO_MONEY',
         old_balance: oldBalance,
-        new_balance: newBalance,
+        new_balance: Number(updatedWallet.balance),
         payment_status: 'completed',
         payment_reference: `GEM-${Date.now()}`,
         payment_metadata: {
           source: 'gems',
           gems_converted: gems,
           coins_before: wallet.coins,
-          coins_after: newCoins,
+          coins_after: Number(updatedWallet.coins),
           conversion_rate: '100 gems = ₹1',
         },
       })
@@ -137,8 +154,8 @@ export async function POST(request: NextRequest) {
         money_added: moneyAdded,
         gems_converted: gems,
         old_balance: oldBalance,
-        new_balance: newBalance,
-        coins_after: newCoins,
+        new_balance: Number(updatedWallet.balance),
+        coins_after: Number(updatedWallet.coins),
         transaction_id: transaction?.id ?? null,
         message: `Converted ${gems} gems to ₹${moneyAdded.toFixed(2)}.`,
       },
