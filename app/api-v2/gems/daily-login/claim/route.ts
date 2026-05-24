@@ -1,26 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-import { verifyBearerToken } from '@/lib/auth';
-import { supabaseAdmin } from '@/lib/supabase';
+import {
+  blockApiV2IfMaintenance,
+  requireApiV2Auth,
+} from '@/lib/api-v2-guards';
 import {
   readGlennJsonBody,
   verifyGlennRequestSecurity,
 } from '@/lib/glenn-request-security';
+import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 export async function POST(request: NextRequest) {
   try {
-    const user = await verifyBearerToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        {
-          error: 'Unauthorized',
-          message: 'Invalid or missing authentication token',
-        },
-        { status: 401 },
-      );
+    const auth = await requireApiV2Auth(request);
+    if (auth.response) {
+      return auth.response;
     }
 
     const parsed = await readGlennJsonBody<Record<string, never>>(request);
@@ -32,9 +29,14 @@ export async function POST(request: NextRequest) {
       return securityError;
     }
 
+    const maintenanceResponse = await blockApiV2IfMaintenance();
+    if (maintenanceResponse) {
+      return maintenanceResponse;
+    }
+
     const { data, error } = await supabaseAdmin.rpc(
       'claim_daily_gem_checkin_for_user',
-      { p_user_id: user.id },
+      { p_user_id: auth.user.id },
     );
 
     if (error || !data) {
@@ -47,7 +49,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return NextResponse.json({ data });
+    return NextResponse.json({
+      apiVersion: 'v2',
+      authenticated: true,
+      data,
+    });
   } catch (error) {
     return NextResponse.json(
       {
