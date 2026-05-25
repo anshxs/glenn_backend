@@ -106,7 +106,7 @@ export async function POST(request: NextRequest) {
 
     // 6. Check if user exists
     const { data: existingUser, error: userCheckError } = await supabaseAdmin
-      .from('public_userdata')
+      .from('sensitive_userdata')
       .select('id, ffuid')
       .eq('id', user_id)
       .single();
@@ -125,7 +125,7 @@ export async function POST(request: NextRequest) {
     // 7. Check if FFUID is already taken by another user
     if (existingUser.ffuid && existingUser.ffuid !== ffuid) {
       const { data: uidConflict } = await supabaseAdmin
-        .from('public_userdata')
+        .from('sensitive_userdata')
         .select('id')
         .eq('ffuid', ffuid)
         .neq('id', user_id)
@@ -143,9 +143,9 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 8. Update public_userdata (ffuid and ffname)
+    // 8. Update sensitive_userdata (ffuid and ffname)
     const { error: publicUpdateError } = await supabaseAdmin
-      .from('public_userdata')
+      .from('sensitive_userdata')
       .update({
         ffuid: ffuid,
         ffname: ff_name,
@@ -154,7 +154,7 @@ export async function POST(request: NextRequest) {
       .eq('id', user_id);
 
     if (publicUpdateError) {
-      console.error('Error updating public_userdata:', publicUpdateError);
+      console.error('Error updating sensitive_userdata:', publicUpdateError);
       return NextResponse.json(
         { 
           success: false,
