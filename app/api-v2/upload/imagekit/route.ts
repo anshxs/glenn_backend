@@ -70,6 +70,33 @@ function sanitizeFolder(value: FormDataEntryValue | null): string {
   return folder.replace(/[^a-zA-Z0-9/_-]/g, '').replace(/^\/+/, '') || 'avatars';
 }
 
+async function looksLikeImage(file: File): Promise<boolean> {
+  if (file.type.startsWith('image/')) return true;
+
+  const lowerName = file.name.toLowerCase();
+  if (/\.(jpe?g|png|webp|gif)$/i.test(lowerName)) return true;
+
+  const bytes = new Uint8Array(await file.slice(0, 12).arrayBuffer());
+  const isJpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  const isPng =
+    bytes[0] === 0x89 &&
+    bytes[1] === 0x50 &&
+    bytes[2] === 0x4e &&
+    bytes[3] === 0x47;
+  const isGif = bytes[0] === 0x47 && bytes[1] === 0x49 && bytes[2] === 0x46;
+  const isWebp =
+    bytes[0] === 0x52 &&
+    bytes[1] === 0x49 &&
+    bytes[2] === 0x46 &&
+    bytes[3] === 0x46 &&
+    bytes[8] === 0x57 &&
+    bytes[9] === 0x45 &&
+    bytes[10] === 0x42 &&
+    bytes[11] === 0x50;
+
+  return isJpeg || isPng || isGif || isWebp;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const formData = await request.formData();
@@ -108,7 +135,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!file.type.startsWith('image/')) {
+    if (!(await looksLikeImage(file))) {
       return NextResponse.json(
         { error: 'Only image uploads are allowed.' },
         { status: 400 },
