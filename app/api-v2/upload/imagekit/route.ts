@@ -70,6 +70,15 @@ function sanitizeFolder(value: FormDataEntryValue | null): string {
   return folder.replace(/[^a-zA-Z0-9/_-]/g, '').replace(/^\/+/, '') || 'avatars';
 }
 
+async function readFormDataWithTimeout(request: NextRequest): Promise<FormData> {
+  return Promise.race([
+    request.formData(),
+    new Promise<FormData>((_, reject) => {
+      setTimeout(() => reject(new Error('Upload request parsing timed out')), 15000);
+    }),
+  ]);
+}
+
 async function looksLikeImage(file: File): Promise<boolean> {
   if (file.type.startsWith('image/')) return true;
 
@@ -99,7 +108,18 @@ async function looksLikeImage(file: File): Promise<boolean> {
 
 export async function POST(request: NextRequest) {
   try {
-    const formData = await request.formData();
+    const user = await verifyBearerToken(request.headers.get('Authorization'));
+    if (!user) {
+      return NextResponse.json(
+        {
+          error: 'Unauthorized',
+          message: 'Invalid or missing authentication token.',
+        },
+        { status: 401 },
+      );
+    }
+
+    const formData = await readFormDataWithTimeout(request);
     const file = formData.get('file');
     const folder = sanitizeFolder(formData.get('folder'));
     const requestedUserId = formData.get('userId');
@@ -115,17 +135,6 @@ export async function POST(request: NextRequest) {
     });
     if (securityError) {
       return securityError;
-    }
-
-    const user = await verifyBearerToken(request.headers.get('Authorization'));
-    if (!user) {
-      return NextResponse.json(
-        {
-          error: 'Unauthorized',
-          message: 'Invalid or missing authentication token.',
-        },
-        { status: 401 },
-      );
     }
 
     if (!(file instanceof File)) {
