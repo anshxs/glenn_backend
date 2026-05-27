@@ -24,13 +24,22 @@ type EncryptedPayloadEnvelope = {
 const MAX_SIGNATURE_AGE_MS = 5 * 60 * 1000;
 
 function getGlennSharedSecret(): string {
-  const configured = process.env.GLENN_REQUEST_HMAC_SECRET?.trim();
-  if (configured) {
-    return configured;
+  return getGlennSharedSecrets()[0];
+}
+
+function getGlennSharedSecrets(): string[] {
+  const configured = process.env.GLENN_REQUEST_HMAC_SECRET ?? '';
+  const secrets = configured
+    .split(',')
+    .map((secret) => secret.trim())
+    .filter(Boolean);
+
+  if (secrets.length > 0) {
+    return secrets;
   }
 
   if (process.env.NODE_ENV === 'development') {
-    return 'glenn_dev_shared_secret';
+    return ['glenn_dev_shared_secret'];
   }
 
   throw new Error('Missing GLENN_REQUEST_HMAC_SECRET');
@@ -332,12 +341,16 @@ export async function verifyGlennRequestSecurity(
               request.method === 'HEAD'
           ? ''
           : await request.clone().text());
-    const expectedSignature = crypto
-      .createHmac('sha256', getGlennSharedSecret())
-      .update(`${timestamp}${bodyText}`)
-      .digest('hex');
+    const validSignature = getGlennSharedSecrets().some((secret) => {
+      const expectedSignature = crypto
+        .createHmac('sha256', secret)
+        .update(`${timestamp}${bodyText}`)
+        .digest('hex');
 
-    if (!timingSafeEqualHex(signature.toLowerCase(), expectedSignature)) {
+      return timingSafeEqualHex(signature.toLowerCase(), expectedSignature);
+    });
+
+    if (!validSignature) {
       await flagOrganiserSecurityEvent({
         app: 'glenn',
         request,
@@ -485,22 +498,38 @@ export async function readGlennJsonBody<T>(
     throw new Error('Missing Glenn device ID for decryption.');
   }
 
-  const key = crypto
-    .createHmac('sha256', getGlennSharedSecret())
-    .update(deviceId)
-    .digest();
+  let decrypted = '';
+  let decryptError: unknown = null;
+  for (const secret of getGlennSharedSecrets()) {
+    try {
+      const key = crypto
+        .createHmac('sha256', secret)
+        .update(deviceId)
+        .digest();
 
-  const decipher = crypto.createDecipheriv(
-    'aes-256-gcm',
-    key,
-    decodeBase64(envelope.iv),
-  );
-  decipher.setAuthTag(decodeBase64(envelope.tag));
+      const decipher = crypto.createDecipheriv(
+        'aes-256-gcm',
+        key,
+        decodeBase64(envelope.iv),
+      );
+      decipher.setAuthTag(decodeBase64(envelope.tag));
 
-  const decrypted = Buffer.concat([
-    decipher.update(decodeBase64(envelope.payload)),
-    decipher.final(),
-  ]).toString('utf8');
+      decrypted = Buffer.concat([
+        decipher.update(decodeBase64(envelope.payload)),
+        decipher.final(),
+      ]).toString('utf8');
+      decryptError = null;
+      break;
+    } catch (error) {
+      decryptError = error;
+    }
+  }
+
+  if (decryptError || !decrypted) {
+    throw new Error(
+      'Unable to decrypt Glenn payload. Check GLENN_REQUEST_HMAC_SECRET on the backend.',
+    );
+  }
 
   return {
     rawBody,
