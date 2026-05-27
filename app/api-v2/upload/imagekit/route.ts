@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 const uploadHistory = new Map<string, number[]>();
-const MAX_UPLOADS_PER_MINUTE = 5;
+const MAX_UPLOADS_PER_MINUTE = 8;
 const MAX_UPLOADS_PER_HOUR = 50;
 
 function cleanOldEntries(userId: string) {
