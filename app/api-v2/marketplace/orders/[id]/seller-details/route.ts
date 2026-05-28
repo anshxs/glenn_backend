@@ -20,10 +20,10 @@ type Body = {
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ orderId: string }> },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { orderId } = await context.params;
+    const { id: orderId } = await context.params;
     if (!UUID_RE.test(orderId)) {
       return NextResponse.json(
         { error: 'Invalid order', message: 'Order ID is invalid.' },

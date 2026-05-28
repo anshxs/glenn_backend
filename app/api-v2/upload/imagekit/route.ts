@@ -171,11 +171,26 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: rateError }, { status: 429 });
     }
 
+    console.info('ImageKit upload start', {
+      userId: user.id,
+      folder,
+      fileName: file.name,
+      fileSize: file.size,
+      fileType: file.type,
+    });
+
     const result = await uploadToImageKit({
       file,
       folder,
       prefix: 'glenn',
       tags: ['glenn-app', folder],
+    });
+
+    console.info('ImageKit upload success', {
+      userId: user.id,
+      folder,
+      filePath: result.filePath,
+      fileId: result.fileId,
     });
 
     recordUpload(user.id);
@@ -185,6 +200,7 @@ export async function POST(request: NextRequest) {
       url: result.url,
       fileId: result.fileId,
       filePath: result.filePath,
+      provider: 'imagekit',
     });
   } catch (error) {
     console.error('API v2 ImageKit upload error:', error);
