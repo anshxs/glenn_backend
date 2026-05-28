@@ -69,11 +69,15 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: restriction } = await supabaseAdmin
+    const { data: restriction, error: restrictionError } = await supabaseAdmin
       .from('marketplace_user_restrictions')
       .select('is_listing_banned, reason')
       .eq('user_id', userId)
       .maybeSingle();
+
+    if (restrictionError) {
+      console.error('Marketplace restriction check failed:', restrictionError);
+    }
 
     if (restriction?.is_listing_banned === true) {
       return NextResponse.json(
@@ -103,12 +107,20 @@ export async function POST(request: NextRequest) {
       .select('*')
       .single();
 
-    if (error) throw error;
-    await logMarketplaceEvent('listing_created', {
-      listingId: data.id,
-      actorId: userId,
-      metadata: { listingType },
-    });
+    if (error) {
+      console.error('Marketplace listing insert failed:', error);
+      throw error;
+    }
+
+    try {
+      await logMarketplaceEvent('listing_created', {
+        listingId: data.id,
+        actorId: userId,
+        metadata: { listingType },
+      });
+    } catch (eventError) {
+      console.error('Marketplace listing event log failed:', eventError);
+    }
 
     return NextResponse.json({ apiVersion: 'v2', data });
   } catch (error) {
