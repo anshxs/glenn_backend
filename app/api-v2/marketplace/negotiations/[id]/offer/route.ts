@@ -62,6 +62,21 @@ export async function POST(
       );
     }
 
+    const { data: existingNegotiation, error: existingError } = await supabaseAdmin
+      .from('marketplace_negotiations')
+      .select('id, status')
+      .eq('listing_id', listingId)
+      .eq('buyer_id', buyerId)
+      .maybeSingle();
+
+    if (existingError) throw existingError;
+    if (existingNegotiation?.status === 'blocked') {
+      return NextResponse.json(
+        { error: 'Blocked', message: 'Seller blocked further negotiations.' },
+        { status: 403 },
+      );
+    }
+
     const { data: negotiation, error: upsertError } = await supabaseAdmin
       .from('marketplace_negotiations')
       .upsert(
@@ -80,13 +95,6 @@ export async function POST(
       .single();
 
     if (upsertError || !negotiation) throw upsertError;
-
-    if (negotiation.status === 'blocked') {
-      return NextResponse.json(
-        { error: 'Blocked', message: 'Seller blocked further negotiations.' },
-        { status: 403 },
-      );
-    }
 
     await supabaseAdmin.from('marketplace_negotiation_messages').insert({
       negotiation_id: negotiation.id,
