@@ -55,7 +55,7 @@ export async function POST(
       listing_id: id,
       purpose: 'listing_fee',
       marketplace_transaction_type: 'MARKETPLACE_LISTING_FEE',
-    });
+    }, 'MARKETPLACE_LISTING_FEE');
     if (payment.response) return payment.response;
 
     const { data, error } = await supabaseAdmin

@@ -61,6 +61,7 @@ export async function POST(
           purpose: 'listing_fee_refund',
           marketplace_transaction_type: 'MARKETPLACE_LISTING_REFUND',
         },
+        'MARKETPLACE_LISTING_REFUND',
       );
     }
 

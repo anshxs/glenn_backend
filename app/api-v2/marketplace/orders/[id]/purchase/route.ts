@@ -57,7 +57,7 @@ export async function POST(
       listing_id: listingId,
       purpose: 'purchase_escrow',
       marketplace_transaction_type: 'MARKETPLACE_PURCHASE',
-    });
+    }, 'MARKETPLACE_PURCHASE');
     if (payment.response) return payment.response;
 
     const { data: lockedListing, error: lockError } = await supabaseAdmin

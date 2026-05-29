@@ -54,7 +54,7 @@ export async function debitWallet(
   amount: number,
   reference: string,
   metadata: Record<string, unknown>,
-  transactionType = 'ADMIN_ADJUSTMENT',
+  transactionType = 'MARKETPLACE_DEBIT',
 ) {
   const { data: wallet, error: walletError } = await supabaseAdmin
     .from('wallets')
@@ -152,7 +152,7 @@ export async function creditWallet(
   amount: number,
   reference: string,
   metadata: Record<string, unknown>,
-  transactionType = 'ADMIN_ADJUSTMENT',
+  transactionType = 'MARKETPLACE_CREDIT',
 ) {
   const { data: wallet, error: walletError } = await supabaseAdmin
     .from('wallets')
