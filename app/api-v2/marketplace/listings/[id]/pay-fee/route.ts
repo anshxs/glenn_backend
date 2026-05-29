@@ -54,6 +54,7 @@ export async function POST(
       feature: 'marketplace',
       listing_id: id,
       purpose: 'listing_fee',
+      marketplace_transaction_type: 'MARKETPLACE_LISTING_FEE',
     });
     if (payment.response) return payment.response;
 

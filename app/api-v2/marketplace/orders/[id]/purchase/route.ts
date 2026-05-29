@@ -56,6 +56,7 @@ export async function POST(
       feature: 'marketplace',
       listing_id: listingId,
       purpose: 'purchase_escrow',
+      marketplace_transaction_type: 'MARKETPLACE_PURCHASE',
     });
     if (payment.response) return payment.response;
 

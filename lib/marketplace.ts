@@ -54,6 +54,7 @@ export async function debitWallet(
   amount: number,
   reference: string,
   metadata: Record<string, unknown>,
+  transactionType = 'ADMIN_ADJUSTMENT',
 ) {
   const { data: wallet, error: walletError } = await supabaseAdmin
     .from('wallets')
@@ -106,8 +107,8 @@ export async function debitWallet(
     .insert({
       user_id: userId,
       wallet_id: wallet.id,
-      amount,
-      transaction_type: 'debit',
+      amount: -amount,
+      transaction_type: transactionType,
       old_balance: oldBalance,
       new_balance: newBalance,
       payment_status: 'completed',
@@ -123,9 +124,21 @@ export async function debitWallet(
       .update({ balance: oldBalance, last_updated: new Date().toISOString() })
       .eq('id', wallet.id);
 
+    console.error('Marketplace debit transaction insert failed:', transactionError);
     return {
       response: NextResponse.json(
-        { error: 'Payment failed', message: 'Could not record transaction.' },
+        {
+          error: 'Payment failed',
+          message:
+            [
+              transactionError?.message,
+              transactionError?.details,
+              transactionError?.hint,
+              transactionError?.code,
+            ]
+              .filter(Boolean)
+              .join(' | ') || 'Could not record marketplace transaction.',
+        },
         { status: 500 },
       ),
     };
@@ -139,6 +152,7 @@ export async function creditWallet(
   amount: number,
   reference: string,
   metadata: Record<string, unknown>,
+  transactionType = 'ADMIN_ADJUSTMENT',
 ) {
   const { data: wallet, error: walletError } = await supabaseAdmin
     .from('wallets')
@@ -164,7 +178,7 @@ export async function creditWallet(
       user_id: userId,
       wallet_id: wallet.id,
       amount,
-      transaction_type: 'credit',
+      transaction_type: transactionType,
       old_balance: oldBalance,
       new_balance: newBalance,
       payment_status: 'completed',

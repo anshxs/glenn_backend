@@ -55,7 +55,12 @@ export async function POST(
         userId,
         amount,
         `marketplace_listing_refund:${id}`,
-        { feature: 'marketplace', listing_id: id, purpose: 'listing_fee_refund' },
+        {
+          feature: 'marketplace',
+          listing_id: id,
+          purpose: 'listing_fee_refund',
+          marketplace_transaction_type: 'MARKETPLACE_LISTING_REFUND',
+        },
       );
     }
 
