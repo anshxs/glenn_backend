@@ -188,7 +188,14 @@ export async function creditWallet(
     .select('id')
     .single();
 
-  if (transactionError || !transaction) throw transactionError;
+  if (transactionError || !transaction) {
+    await supabaseAdmin
+      .from('wallets')
+      .update({ balance: oldBalance, last_updated: new Date().toISOString() })
+      .eq('id', wallet.id);
+    console.error('Marketplace credit transaction insert failed:', transactionError);
+    throw transactionError ?? new Error('Could not record marketplace credit.');
+  }
   return transaction.id as string;
 }
 

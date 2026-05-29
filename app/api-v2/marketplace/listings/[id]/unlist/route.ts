@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 
 import {
   creditWallet,
+  LISTING_FEE,
   logMarketplaceEvent,
   readSecureMarketplaceBody,
   UUID_RE,
@@ -49,7 +50,10 @@ export async function POST(
     }
 
     let refundTransactionId: string | null = null;
-    const amount = Number(listing.listing_fee_amount || 0);
+    const storedFee = Number(listing.listing_fee_amount);
+    const amount = Number.isFinite(storedFee) && storedFee > 0
+      ? storedFee
+      : LISTING_FEE;
     if (listing.status === 'active' && amount > 0) {
       refundTransactionId = await creditWallet(
         userId,
