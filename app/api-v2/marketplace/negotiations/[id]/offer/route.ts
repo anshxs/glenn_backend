@@ -17,10 +17,10 @@ type Body = {
 
 export async function POST(
   request: NextRequest,
-  context: { params: Promise<{ listingId: string }> },
+  context: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { listingId } = await context.params;
+    const { id: listingId } = await context.params;
     if (!UUID_RE.test(listingId)) {
       return NextResponse.json(
         { error: 'Invalid listing', message: 'Listing ID is invalid.' },
