@@ -42,7 +42,7 @@ export async function POST(
       );
     }
 
-    if (listing.status !== 'fee_pending') {
+    if (!['fee_pending', 'unlisted'].includes(listing.status)) {
       return NextResponse.json(
         { error: 'Already handled', message: 'Listing fee is not pending.' },
         { status: 400 },
@@ -63,11 +63,16 @@ export async function POST(
       .update({
         status: 'active',
         listing_fee_transaction_id: payment.transactionId,
+        buyer_id: null,
+        purchase_transaction_id: null,
         active_at: new Date().toISOString(),
+        reserved_at: null,
+        sold_at: null,
+        unlisted_at: null,
       })
       .eq('id', id)
       .eq('seller_id', userId)
-      .eq('status', 'fee_pending')
+      .in('status', ['fee_pending', 'unlisted'])
       .select('*')
       .single();
 
