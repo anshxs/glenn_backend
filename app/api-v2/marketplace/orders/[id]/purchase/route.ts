@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 import {
+  creditWallet,
   debitWallet,
   LISTING_FEE,
   PLATFORM_FEE,
@@ -13,6 +14,19 @@ import { supabaseAdmin } from '@/lib/supabase';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
+
+function supabaseErrorMessage(error: unknown, fallback: string) {
+  if (!error || typeof error !== 'object') return fallback;
+  const item = error as {
+    message?: string;
+    details?: string | null;
+    hint?: string | null;
+    code?: string | null;
+  };
+  return [item.message, item.details, item.hint, item.code]
+    .filter(Boolean)
+    .join(' | ') || fallback;
+}
 
 export async function POST(
   request: NextRequest,
@@ -74,8 +88,30 @@ export async function POST(
       .single();
 
     if (lockError || !lockedListing) {
+      await creditWallet(
+        buyerId,
+        price,
+        `marketplace_purchase_rollback:${listingId}`,
+        {
+          feature: 'marketplace',
+          listing_id: listingId,
+          reason: 'listing_reserve_failed',
+          original_transaction_id: payment.transactionId,
+          marketplace_transaction_type: 'MARKETPLACE_BUYER_REFUND',
+        },
+        'MARKETPLACE_BUYER_REFUND',
+      ).catch((refundError) => {
+        console.error('Marketplace purchase rollback refund failed:', refundError);
+      });
+      console.error('Marketplace listing reserve failed:', lockError);
       return NextResponse.json(
-        { error: 'Unavailable', message: 'Someone reserved this listing first.' },
+        {
+          error: 'Unavailable',
+          message: supabaseErrorMessage(
+            lockError,
+            'Someone reserved this listing first.',
+          ),
+        },
         { status: 409 },
       );
     }
@@ -96,7 +132,44 @@ export async function POST(
       .select('*')
       .single();
 
-    if (orderError || !order) throw orderError ?? new Error('Could not create order.');
+    if (orderError || !order) {
+      await supabaseAdmin
+        .from('marketplace_listings')
+        .update({
+          status: 'active',
+          buyer_id: null,
+          purchase_transaction_id: null,
+          reserved_at: null,
+        })
+        .eq('id', listingId)
+        .eq('buyer_id', buyerId)
+        .eq('purchase_transaction_id', payment.transactionId);
+
+      await creditWallet(
+        buyerId,
+        price,
+        `marketplace_purchase_rollback:${listingId}`,
+        {
+          feature: 'marketplace',
+          listing_id: listingId,
+          reason: 'order_create_failed',
+          original_transaction_id: payment.transactionId,
+          marketplace_transaction_type: 'MARKETPLACE_BUYER_REFUND',
+        },
+        'MARKETPLACE_BUYER_REFUND',
+      ).catch((refundError) => {
+        console.error('Marketplace order rollback refund failed:', refundError);
+      });
+
+      console.error('Marketplace order insert failed:', orderError);
+      return NextResponse.json(
+        {
+          error: 'Order failed',
+          message: supabaseErrorMessage(orderError, 'Could not create order.'),
+        },
+        { status: 500 },
+      );
+    }
     await logMarketplaceEvent('order_paid', {
       listingId,
       orderId: order.id,
