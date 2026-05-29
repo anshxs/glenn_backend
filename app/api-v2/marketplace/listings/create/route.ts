@@ -55,6 +55,16 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (!youtubeUrl) {
+      return NextResponse.json(
+        {
+          error: 'Missing video proof',
+          message: 'YouTube video link is required.',
+        },
+        { status: 400 },
+      );
+    }
+
     if (listingType === 'game_id' && !gameUid) {
       return NextResponse.json(
         { error: 'Missing UID', message: 'Free Fire UID is required.' },
