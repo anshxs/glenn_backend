@@ -78,12 +78,6 @@ export async function POST(
       .maybeSingle();
 
     if (existingError) throw existingError;
-    if (existingNegotiation?.status === 'blocked') {
-      return NextResponse.json(
-        { error: 'Blocked', message: 'Seller blocked further negotiations.' },
-        { status: 403 },
-      );
-    }
 
     const { data: negotiation, error: upsertError } = await supabaseAdmin
       .from('marketplace_negotiations')
@@ -95,7 +89,6 @@ export async function POST(
           status: 'buyer_countered',
           current_offer: amount,
           last_actor_id: buyerId,
-          blocked_at: null,
         },
         { onConflict: 'listing_id,buyer_id' },
       )

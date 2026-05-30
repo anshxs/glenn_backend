@@ -16,7 +16,7 @@ type Body = {
   note?: unknown;
 };
 
-const ACTIONS = new Set(['counter', 'accept', 'deny', 'block']);
+const ACTIONS = new Set(['counter', 'accept', 'deny']);
 
 export async function POST(
   request: NextRequest,
@@ -103,9 +103,6 @@ export async function POST(
           ? lastSellerPrice
           : listingPrice;
       messageType = 'denied';
-    } else if (action === 'block') {
-      status = 'blocked';
-      messageType = 'blocked';
     }
 
     const { data, error } = await supabaseAdmin
@@ -114,7 +111,6 @@ export async function POST(
         status,
         current_offer: currentOffer,
         last_actor_id: sellerId,
-        blocked_at: action === 'block' ? new Date().toISOString() : negotiation.blocked_at,
       })
       .eq('id', id)
       .eq('seller_id', sellerId)
