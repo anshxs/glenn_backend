@@ -60,14 +60,23 @@ export async function POST(
     }
 
     const listingPrice = Number(negotiation.marketplace_listings?.price ?? 0);
+    const buyerOffer = Number(negotiation.current_offer ?? 0);
     let status = negotiation.status;
     let currentOffer = negotiation.current_offer;
     let messageType = action;
 
     if (action === 'counter') {
-      if (!Number.isFinite(amount) || amount <= 0 || amount >= listingPrice) {
+      if (
+        !Number.isFinite(amount) ||
+        amount <= buyerOffer ||
+        amount > listingPrice
+      ) {
         return NextResponse.json(
-          { error: 'Invalid price', message: 'Lower price must be below current price.' },
+          {
+            error: 'Invalid price',
+            message:
+              'Seller price must be above buyer offer and not above listed price.',
+          },
           { status: 400 },
         );
       }
@@ -78,7 +87,22 @@ export async function POST(
       status = 'accepted';
       messageType = 'accepted';
     } else if (action === 'deny') {
+      if (
+        !Number.isFinite(amount) ||
+        amount <= buyerOffer ||
+        amount > listingPrice
+      ) {
+        return NextResponse.json(
+          {
+            error: 'Invalid price',
+            message:
+              'Choose your latest seller price before denying the offer.',
+          },
+          { status: 400 },
+        );
+      }
       status = 'denied';
+      currentOffer = amount;
       messageType = 'denied';
     } else if (action === 'block') {
       status = 'blocked';
@@ -105,7 +129,7 @@ export async function POST(
       listing_id: negotiation.listing_id,
       sender_id: sellerId,
       message_type: messageType,
-      amount: action === 'counter' ? amount : currentOffer,
+      amount: currentOffer,
       note: note || null,
     });
 
