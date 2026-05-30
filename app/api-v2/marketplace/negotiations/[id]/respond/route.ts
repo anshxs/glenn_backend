@@ -60,7 +60,15 @@ export async function POST(
     }
 
     const listingPrice = Number(negotiation.marketplace_listings?.price ?? 0);
-    const buyerOffer = Number(negotiation.current_offer ?? 0);
+    const { data: lastSellerMessage } = await supabaseAdmin
+      .from('marketplace_negotiation_messages')
+      .select('amount')
+      .eq('negotiation_id', id)
+      .eq('message_type', 'seller_counter')
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
     let status = negotiation.status;
     let currentOffer = negotiation.current_offer;
     let messageType = action;
@@ -69,14 +77,14 @@ export async function POST(
       if (
         !Number.isFinite(amount) ||
         !Number.isInteger(amount) ||
-        amount <= buyerOffer ||
+        amount <= 0 ||
         amount > listingPrice
       ) {
         return NextResponse.json(
           {
             error: 'Invalid price',
             message:
-              'Seller price must be above buyer offer and not above listed price.',
+              'Seller price must be a whole rupee and not above listed price.',
           },
           { status: 400 },
         );
@@ -88,23 +96,12 @@ export async function POST(
       status = 'accepted';
       messageType = 'accepted';
     } else if (action === 'deny') {
-      if (
-        !Number.isFinite(amount) ||
-        !Number.isInteger(amount) ||
-        amount <= buyerOffer ||
-        amount > listingPrice
-      ) {
-        return NextResponse.json(
-          {
-            error: 'Invalid price',
-            message:
-              'Choose your latest seller price before denying the offer.',
-          },
-          { status: 400 },
-        );
-      }
+      const lastSellerPrice = Number(lastSellerMessage?.amount ?? listingPrice);
       status = 'denied';
-      currentOffer = amount;
+      currentOffer =
+        Number.isFinite(lastSellerPrice) && lastSellerPrice > 0
+          ? lastSellerPrice
+          : listingPrice;
       messageType = 'denied';
     } else if (action === 'block') {
       status = 'blocked';
