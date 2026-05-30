@@ -55,9 +55,17 @@ export async function POST(
       );
     }
 
-    if (!Number.isFinite(amount) || amount <= 0 || amount >= Number(listing.price)) {
+    if (
+      !Number.isFinite(amount) ||
+      !Number.isInteger(amount) ||
+      amount <= 0 ||
+      amount >= Number(listing.price)
+    ) {
       return NextResponse.json(
-        { error: 'Invalid offer', message: 'Offer must be below current price.' },
+        {
+          error: 'Invalid offer',
+          message: 'Offer must be a whole rupee below current price.',
+        },
         { status: 400 },
       );
     }

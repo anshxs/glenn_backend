@@ -68,6 +68,7 @@ export async function POST(
     if (action === 'counter') {
       if (
         !Number.isFinite(amount) ||
+        !Number.isInteger(amount) ||
         amount <= buyerOffer ||
         amount > listingPrice
       ) {
@@ -89,6 +90,7 @@ export async function POST(
     } else if (action === 'deny') {
       if (
         !Number.isFinite(amount) ||
+        !Number.isInteger(amount) ||
         amount <= buyerOffer ||
         amount > listingPrice
       ) {

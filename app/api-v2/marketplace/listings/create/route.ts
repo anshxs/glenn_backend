@@ -45,11 +45,17 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (!title || !Number.isFinite(price) || price <= 0 || imageUrls.length < 4) {
+    if (
+      !title ||
+      !Number.isFinite(price) ||
+      !Number.isInteger(price) ||
+      price <= 0 ||
+      imageUrls.length < 4
+    ) {
       return NextResponse.json(
         {
           error: 'Invalid listing',
-          message: 'Add title, valid price and 4 to 6 images.',
+          message: 'Add title, whole-rupee price and 4 to 6 images.',
         },
         { status: 400 },
       );
