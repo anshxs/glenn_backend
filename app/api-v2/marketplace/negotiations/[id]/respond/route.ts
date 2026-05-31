@@ -93,9 +93,27 @@ export async function POST(
       currentOffer = amount;
       messageType = 'seller_counter';
     } else if (action === 'accept') {
+      if (negotiation.last_actor_id === sellerId) {
+        return NextResponse.json(
+          {
+            error: 'No buyer offer',
+            message: 'Accept is available only after the buyer sends an offer.',
+          },
+          { status: 400 },
+        );
+      }
       status = 'accepted';
       messageType = 'accepted';
     } else if (action === 'deny') {
+      if (negotiation.last_actor_id === sellerId) {
+        return NextResponse.json(
+          {
+            error: 'No buyer offer',
+            message: 'Deny is available only after the buyer sends an offer.',
+          },
+          { status: 400 },
+        );
+      }
       const lastSellerPrice = Number(lastSellerMessage?.amount ?? listingPrice);
       status = 'denied';
       currentOffer =
