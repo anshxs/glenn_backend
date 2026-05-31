@@ -15,10 +15,6 @@ import { supabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-type Body = {
-  negotiationId?: unknown;
-};
-
 function supabaseErrorMessage(error: unknown, fallback: string) {
   if (!error || typeof error !== 'object') return fallback;
   const item = error as {
@@ -45,7 +41,7 @@ export async function POST(
       );
     }
 
-    const secure = await readSecureMarketplaceBody<Body>(request);
+    const secure = await readSecureMarketplaceBody<Record<string, never>>(request);
     if (secure.response) return secure.response;
     const buyerId = secure.auth.user.id;
 
@@ -69,69 +65,12 @@ export async function POST(
       );
     }
 
-    const negotiationId =
-      typeof secure.parsed.data.negotiationId === 'string'
-        ? secure.parsed.data.negotiationId
-        : '';
-    let price = Number(listing.price);
-    let negotiated = false;
-
-    if (negotiationId) {
-      if (!UUID_RE.test(negotiationId)) {
-        return NextResponse.json(
-          { error: 'Invalid negotiation', message: 'Negotiation ID is invalid.' },
-          { status: 400 },
-        );
-      }
-
-      const { data: negotiation, error: negotiationError } = await supabaseAdmin
-        .from('marketplace_negotiations')
-        .select('id, listing_id, seller_id, buyer_id, status, current_offer')
-        .eq('id', negotiationId)
-        .single();
-
-      if (
-        negotiationError ||
-        !negotiation ||
-        negotiation.listing_id !== listingId ||
-        negotiation.buyer_id !== buyerId ||
-        negotiation.seller_id !== listing.seller_id ||
-        !['seller_countered', 'accepted', 'denied'].includes(negotiation.status)
-      ) {
-        return NextResponse.json(
-          {
-            error: 'Negotiation unavailable',
-            message: 'This negotiated price is not available for purchase.',
-          },
-          { status: 400 },
-        );
-      }
-
-      const negotiatedPrice = Number(negotiation.current_offer);
-      if (
-        !Number.isFinite(negotiatedPrice) ||
-        !Number.isInteger(negotiatedPrice) ||
-        negotiatedPrice <= 0
-      ) {
-        return NextResponse.json(
-          {
-            error: 'Invalid price',
-            message: 'Negotiated price is invalid.',
-          },
-          { status: 400 },
-        );
-      }
-
-      price = negotiatedPrice;
-      negotiated = true;
-    }
+    const price = Number(listing.price);
 
     const payment = await debitWallet(buyerId, price, `marketplace_purchase:${listingId}`, {
       feature: 'marketplace',
       listing_id: listingId,
-      negotiation_id: negotiationId || null,
       purpose: 'purchase_escrow',
-      negotiated,
       marketplace_transaction_type: 'MARKETPLACE_PURCHASE',
     }, 'MARKETPLACE_PURCHASE');
     if (payment.response) return payment.response;
@@ -239,8 +178,6 @@ export async function POST(
       metadata: {
         transactionId: payment.transactionId,
         amount: price,
-        negotiationId: negotiationId || null,
-        negotiated,
       },
     });
 
