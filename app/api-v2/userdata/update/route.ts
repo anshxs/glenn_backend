@@ -36,6 +36,11 @@ const ALLOWED_FIELDS = new Set([
   'location_lat',
   'location_lng',
   'location_updated_at',
+  'team_roles',
+  'team_instagram_url',
+  'team_youtube_url',
+  'team_description',
+  'team_builder_enabled',
 ]);
 
 const TEXT_FIELDS = new Set([
@@ -50,6 +55,9 @@ const TEXT_FIELDS = new Set([
   'sc_character',
   'sc_weapon',
   'sc_weapon2',
+  'team_instagram_url',
+  'team_youtube_url',
+  'team_description',
 ]);
 
 function cleanText(value: unknown, maxLength = 500): string | null {
@@ -94,7 +102,7 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
       continue;
     }
 
-    if (key === 'show_tournaments' || key === 'isonline') {
+    if (key === 'show_tournaments' || key === 'isonline' || key === 'team_builder_enabled') {
       const bool = cleanBoolean(value);
       if (bool == null) throw new Error(`Invalid boolean for ${key}`);
       update[key] = bool;
@@ -117,6 +125,13 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
 
     if (key === 'otherurls' || key === 'squad') {
       update[key] = value ?? null;
+    }
+
+    if (key === 'team_roles') {
+      if (!Array.isArray(value)) throw new Error('Invalid roles');
+      update[key] = value
+        .map((role) => cleanText(role, 40))
+        .filter((role): role is string => Boolean(role));
     }
   }
 
