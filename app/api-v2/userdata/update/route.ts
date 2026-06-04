@@ -66,6 +66,19 @@ function cleanText(value: unknown, maxLength = 500): string | null {
   return text.length > maxLength ? text.slice(0, maxLength) : text;
 }
 
+function cleanSocialUsername(value: unknown): string | null {
+  const text = cleanText(value, 120);
+  if (!text) return null;
+  const username = text
+    .replace(/^https?:\/\/(www\.)?/i, '')
+    .replace(/^(instagram\.com\/|youtube\.com\/@?)/i, '')
+    .replace(/^@/, '')
+    .split('?')[0]
+    .split('/')[0]
+    .trim();
+  return username || null;
+}
+
 function cleanNumber(value: unknown): number | null {
   if (value == null) return null;
   const number = typeof value === 'number' ? value : Number(value);
@@ -89,6 +102,11 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
   for (const [key, value] of Object.entries(input)) {
     if (!ALLOWED_FIELDS.has(key)) {
       throw new Error(`Unsupported user field: ${key}`);
+    }
+
+    if (key === 'team_instagram_url' || key === 'team_youtube_url') {
+      update[key] = cleanSocialUsername(value);
+      continue;
     }
 
     if (TEXT_FIELDS.has(key)) {
