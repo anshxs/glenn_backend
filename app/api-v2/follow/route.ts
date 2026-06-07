@@ -69,58 +69,6 @@ async function syncFollowCounts(followerId: string, followeeId: string) {
   };
 }
 
-async function maybeCreateFollowNotification(
-  followId: string,
-  followerId: string,
-  followeeId: string,
-  followerUsername: string,
-  followerAvatarUrl?: string | null,
-) {
-  const { error: notificationInsertError } = await supabaseAdmin
-    .from('user_notifications')
-    .insert({
-      user_id: followeeId,
-      type: 'new_follower',
-      title: 'New Follower! 🎉',
-      message: `@${followerUsername} started following you`,
-      data: {
-        screen: 'profile',
-        follower_id: followerId,
-        follower_username: followerUsername,
-        follow_id: followId,
-        large_icon: followerAvatarUrl,
-        big_picture: followerAvatarUrl,
-      },
-      onclick: {
-        screen: 'profile',
-        user_id: followerId,
-      },
-      payload: {
-        headings: { en: 'New Follower! 🎉' },
-        contents: { en: `@${followerUsername} started following you` },
-        data: {
-          screen: 'profile',
-          follower_id: followerId,
-          follower_username: followerUsername,
-          follow_id: followId,
-        },
-        ...(followerAvatarUrl
-          ? {
-              large_icon: followerAvatarUrl,
-              big_picture: followerAvatarUrl,
-              ios_attachments: { image: followerAvatarUrl },
-            }
-          : {}),
-      },
-      is_read: false,
-      sent: false,
-    });
-
-  if (notificationInsertError) {
-    console.error('Failed to store notification:', notificationInsertError);
-  }
-}
-
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireApiV2Auth(request);
@@ -240,8 +188,6 @@ export async function POST(request: NextRequest) {
     if (existingError) throw existingError;
 
     let followData = existingFollow;
-    let createdFollow = false;
-
     if (!followData) {
       const { data, error } = await supabaseAdmin
         .from('followers')
@@ -254,25 +200,9 @@ export async function POST(request: NextRequest) {
 
       if (error) throw error;
       followData = data;
-      createdFollow = true;
     }
 
     const counts = await syncFollowCounts(followerId, targetUserId);
-
-    if (createdFollow && followData?.id) {
-      maybeCreateFollowNotification(
-        followData.id,
-        followerId,
-        targetUserId,
-        followerUser.username,
-        followerUser.avatarurl,
-      ).catch((error) => {
-        console.error(
-          'Follow notification failed:',
-          error instanceof Error ? error.message : error,
-        );
-      });
-    }
 
     return NextResponse.json({
       apiVersion: 'v2',

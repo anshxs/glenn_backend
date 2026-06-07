@@ -444,59 +444,7 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // 18. Notify every app user included in this registration (captain + app teammates).
-    const { data: registeredParticipants, error: registeredParticipantsError } = await supabaseAdmin
-      .from('tournament_participants')
-      .select('id, participant_id, slot_number')
-      .eq('transaction_id', transaction.id);
-
-    if (registeredParticipantsError) {
-      console.error('Failed to fetch registered participant rows for notifications:', registeredParticipantsError);
-    }
-
-    const participantRowByUserId = new Map<string, { id: string; slot_number: number | null }>();
-    for (const row of registeredParticipants ?? []) {
-      const participantUserId = String(row.participant_id ?? '');
-      if (!participantUserId || participantRowByUserId.has(participantUserId)) continue;
-      participantRowByUserId.set(participantUserId, {
-        id: String(row.id ?? ''),
-        slot_number: row.slot_number == null ? null : Number(row.slot_number),
-      });
-    }
-
-    const notificationRows = allAppParticipantIds.map((appUserId) => {
-      const participantRow = participantRowByUserId.get(appUserId);
-      return {
-        user_id: appUserId,
-        type: 'tournament_registration',
-        title: 'Registration Successful! 🎮',
-        message: `You are registered for ${tournament.tournament_name}`,
-        data: {
-          screen: 'tournament_detail',
-          tournament_id: tournament_id,
-          tournament_name: tournament.tournament_name,
-          participant_id: participantRow?.id ?? null,
-          participant_user_id: appUserId,
-          slot_number: participantRow?.slot_number ?? participant.slot_number,
-          registered_by_user_id: user_id,
-          team_name: participant.team_name,
-        },
-        is_read: false,
-        sent: false,
-      };
-    });
-
-    if (notificationRows.length > 0) {
-      const { error: notificationInsertError } = await supabaseAdmin
-        .from('user_notifications')
-        .insert(notificationRows);
-
-      if (notificationInsertError) {
-        console.error('Failed to store registration notifications:', notificationInsertError);
-      }
-    }
-
-    // 19. Return success response
+    // 18. Return success response
     return NextResponse.json(
       {
         success: true,
