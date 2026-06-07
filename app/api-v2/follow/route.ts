@@ -22,52 +22,6 @@ type FollowBody = {
 const UUID_REGEX =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-async function sendFollowNotification(
-  playerIds: string[],
-  followerUsername: string,
-  followerAvatarUrl?: string | null,
-) {
-  const appId = process.env.ONESIGNAL_APP_ID;
-  const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
-
-  if (!appId || !restApiKey) {
-    console.error('OneSignal credentials not configured');
-    return;
-  }
-
-  const response = await fetch('https://onesignal.com/api/v1/notifications', {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Basic ${restApiKey}`,
-    },
-    body: JSON.stringify({
-      app_id: appId,
-      include_player_ids: playerIds,
-      headings: { en: 'New Follower! 🎉' },
-      contents: { en: `@${followerUsername} started following you` },
-      data: {
-        type: 'new_follower',
-        follower_username: followerUsername,
-        screen: 'profile',
-        username: followerUsername,
-      },
-      ...(followerAvatarUrl
-        ? {
-            big_picture: followerAvatarUrl,
-            large_icon: followerAvatarUrl,
-            ios_attachments: { image: followerAvatarUrl },
-          }
-        : {}),
-    }),
-  });
-
-  const result = await response.json().catch(() => null);
-  if (!response.ok || result?.errors) {
-    console.error('OneSignal notification failed:', result);
-  }
-}
-
 async function countFollowers(userId: string) {
   const { count, error } = await supabaseAdmin
     .from('followers')
@@ -122,63 +76,48 @@ async function maybeCreateFollowNotification(
   followerUsername: string,
   followerAvatarUrl?: string | null,
 ) {
-  const { data: notificationData, error: notificationInsertError } =
-    await supabaseAdmin
-      .from('user_notifications')
-      .insert({
-        user_id: followeeId,
-        type: 'new_follower',
-        title: 'New Follower! 🎉',
-        message: `@${followerUsername} started following you`,
+  const { error: notificationInsertError } = await supabaseAdmin
+    .from('user_notifications')
+    .insert({
+      user_id: followeeId,
+      type: 'new_follower',
+      title: 'New Follower! 🎉',
+      message: `@${followerUsername} started following you`,
+      data: {
+        screen: 'profile',
+        follower_id: followerId,
+        follower_username: followerUsername,
+        follow_id: followId,
+        large_icon: followerAvatarUrl,
+        big_picture: followerAvatarUrl,
+      },
+      onclick: {
+        screen: 'profile',
+        user_id: followerId,
+      },
+      payload: {
+        headings: { en: 'New Follower! 🎉' },
+        contents: { en: `@${followerUsername} started following you` },
         data: {
+          screen: 'profile',
           follower_id: followerId,
           follower_username: followerUsername,
           follow_id: followId,
         },
-        is_read: false,
-        sent: false,
-      })
-      .select('id')
-      .single();
+        ...(followerAvatarUrl
+          ? {
+              large_icon: followerAvatarUrl,
+              big_picture: followerAvatarUrl,
+              ios_attachments: { image: followerAvatarUrl },
+            }
+          : {}),
+      },
+      is_read: false,
+      sent: false,
+    });
 
   if (notificationInsertError) {
     console.error('Failed to store notification:', notificationInsertError);
-    return;
-  }
-
-  const { data: followeeNotifications, error: followeeNotificationsError } =
-    await supabaseAdmin
-      .from('notifications')
-      .select('onesignal_player_id, is_notifications_enabled')
-      .eq('user_id', followeeId)
-      .maybeSingle();
-
-  if (followeeNotificationsError) {
-    console.error(
-      'Failed to load followee notification settings:',
-      followeeNotificationsError,
-    );
-    return;
-  }
-
-  if (
-    !followeeNotifications?.onesignal_player_id ||
-    !followeeNotifications?.is_notifications_enabled
-  ) {
-    return;
-  }
-
-  await sendFollowNotification(
-    [followeeNotifications.onesignal_player_id],
-    followerUsername,
-    followerAvatarUrl,
-  );
-
-  if (notificationData?.id) {
-    await supabaseAdmin
-      .from('user_notifications')
-      .update({ sent: true })
-      .eq('id', notificationData.id);
   }
 }
 
