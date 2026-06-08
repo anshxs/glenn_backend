@@ -21,10 +21,12 @@ const ALLOWED_BODY_KEYS = new Set(['task_key']);
 const ALLOWED_TASK_KEYS = new Set([
   'daily_like_post',
   'daily_dm_friend',
+  'daily_world_chat_message',
   'first_community_post',
   'team_builder_profile',
   'first_follow_user',
   'follow_glenn_instagram',
+  'follow_glenn_youtube',
   'follow_whatsapp_channel',
 ]);
 
