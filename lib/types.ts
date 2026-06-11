@@ -16,6 +16,8 @@ export interface Tournament {
   entryfee: number;
   tournament_datetime: string;
   registration_allowed: boolean;
+  is_external: boolean;
+  external_link?: string | null;
   organiser_id?: string;
   organiser_name?: string;
   organiser_contact?: string;

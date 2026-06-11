@@ -122,6 +122,13 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    if (tournament.is_external === true) {
+      return NextResponse.json(
+        { error: 'External registration', message: 'This tournament uses external registration.' },
+        { status: 400 }
+      );
+    }
+
     // 5. Verify the amount matches the tournament entry fee
     if (amount !== tournament.entryfee) {
       return NextResponse.json(
