@@ -98,25 +98,6 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const { data: uidConflict, error: uidConflictError } = await supabaseAdmin
-      .from('sensitive_userdata')
-      .select('id')
-      .eq('ffuid', ffuid)
-      .neq('id', user.id)
-      .maybeSingle();
-
-    if (uidConflictError) throw uidConflictError;
-    if (uidConflict) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: 'Conflict',
-          message: 'This FFUID is already registered to another user.',
-        },
-        { status: 409 },
-      );
-    }
-
     const update: Record<string, unknown> = {
       ffuid,
       ffname: ffName,
