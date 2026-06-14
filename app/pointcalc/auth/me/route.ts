@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 
 import {
   createPointCalcAnonClient,
-  ensurePointCalcUserData,
   getPointCalcUserData,
   getPointCalcWhatsappUrl,
 } from "@/lib/pointcalc-supabase";
@@ -41,7 +40,6 @@ export async function GET(request: NextRequest) {
       );
     }
 
-    await ensurePointCalcUserData(accessToken, user);
     const profile = await getPointCalcUserData(accessToken, user.id);
 
     return NextResponse.json({

@@ -62,28 +62,10 @@ to authenticated
 using (auth.uid() = id);
 
 drop policy if exists "userdata_insert_own_row" on public.userdata;
-create policy "userdata_insert_own_row"
-on public.userdata
-for insert
-to authenticated
-with check (
-  auth.uid() = id
-  and has_access = false
-);
-
 drop policy if exists "userdata_update_own_safe_fields" on public.userdata;
-create policy "userdata_update_own_safe_fields"
-on public.userdata
-for update
-to authenticated
-using (auth.uid() = id)
-with check (
-  auth.uid() = id
-  and has_access = (
-    select u.has_access
-    from public.userdata as u
-    where u.id = auth.uid()
-  )
-);
+revoke delete on public.userdata from anon, authenticated;
+drop policy if exists "userdata_delete_own_row" on public.userdata;
 
+revoke insert on public.userdata from anon, authenticated;
+revoke update on public.userdata from anon, authenticated;
 revoke delete on public.userdata from anon, authenticated;
