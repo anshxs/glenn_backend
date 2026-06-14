@@ -12,6 +12,7 @@ type RefreshBody = {
   refreshToken?: string;
 };
 
+
 export async function OPTIONS() {
   return NextResponse.json({}, { status: 200 });
 }
