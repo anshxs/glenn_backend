@@ -12,6 +12,7 @@ export type PointCalcUserDataRow = {
   email: string;
   name: string | null;
   aadhar_card: string | null;
+  phone: string | null;
   has_access: boolean;
 };
 
@@ -49,7 +50,7 @@ export async function getPointCalcUserData(
   const client = createPointCalcUserClient(accessToken);
   const { data, error } = await client
     .from("userdata")
-    .select("id, email, name, aadhar_card, has_access")
+    .select("id, email, name, aadhar_card, phone, has_access")
     .eq("id", userId)
     .maybeSingle<PointCalcUserDataRow>();
 

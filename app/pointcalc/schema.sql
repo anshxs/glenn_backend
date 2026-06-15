@@ -3,10 +3,14 @@ create table if not exists public.userdata (
   email text not null,
   name text,
   aadhar_card text,
+  phone text,
   has_access boolean not null default false,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
+
+alter table public.userdata
+add column if not exists phone text;
 
 create or replace function public.set_userdata_updated_at()
 returns trigger
@@ -31,12 +35,13 @@ security definer
 set search_path = public
 as $$
 begin
-  insert into public.userdata (id, email, name, aadhar_card, has_access)
+  insert into public.userdata (id, email, name, aadhar_card, phone, has_access)
   values (
     new.id,
     coalesce(new.email, ''),
     nullif(trim(coalesce(new.raw_user_meta_data->>'name', '')), ''),
     null,
+    nullif(trim(coalesce(new.raw_user_meta_data->>'phone', '')), ''),
     false
   )
   on conflict (id) do update
