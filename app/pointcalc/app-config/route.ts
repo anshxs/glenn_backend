@@ -15,9 +15,7 @@ export async function GET(request: NextRequest) {
     const client = createPointCalcAnonClient();
     const { data, error } = await client
       .from("pointcalc_app_config")
-      .select(
-        "id, config_version, min_supported_app_version, latest_app_version, download_url, release_notes, updated_at",
-      )
+      .select("id, config_version, min_supported_app_version, download_url")
       .eq("id", "default")
       .maybeSingle();
 

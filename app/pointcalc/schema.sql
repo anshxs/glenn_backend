@@ -135,11 +135,7 @@ create table if not exists public.pointcalc_app_config (
   id text primary key default 'default',
   config_version text not null default '1.0.0',
   min_supported_app_version text,
-  latest_app_version text,
   download_url text not null default '',
-  active_theme_name text not null default 'default',
-  release_notes text not null default '',
-  themes_json jsonb not null default '{}'::jsonb,
   created_at timestamptz not null default timezone('utc', now()),
   updated_at timestamptz not null default timezone('utc', now())
 );
@@ -163,21 +159,29 @@ execute function public.set_pointcalc_app_config_updated_at();
 alter table public.pointcalc_app_config
 add column if not exists download_url text not null default '';
 
+alter table public.pointcalc_app_config
+drop column if exists latest_app_version;
+
+alter table public.pointcalc_app_config
+drop column if exists active_theme_name;
+
+alter table public.pointcalc_app_config
+drop column if exists release_notes;
+
+alter table public.pointcalc_app_config
+drop column if exists themes_json;
+
 insert into public.pointcalc_app_config (
   id,
   config_version,
   download_url,
-  active_theme_name,
-  release_notes,
-  themes_json
+  min_supported_app_version
 )
 values (
   'default',
   '1.0.0',
   '',
-  'default',
-  'Initial PointCalc config.',
-  '{}'::jsonb
+  null
 )
 on conflict (id) do nothing;
 
