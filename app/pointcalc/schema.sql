@@ -130,3 +130,60 @@ using (auth.uid() = user_id)
 with check (auth.uid() = user_id);
 
 revoke delete on public.pointcalc_final_standings from anon, authenticated;
+
+create table if not exists public.pointcalc_app_config (
+  id text primary key default 'default',
+  config_version text not null default '1.0.0',
+  min_supported_app_version text,
+  latest_app_version text,
+  active_theme_name text not null default 'default',
+  release_notes text not null default '',
+  themes_json jsonb not null default '{}'::jsonb,
+  created_at timestamptz not null default timezone('utc', now()),
+  updated_at timestamptz not null default timezone('utc', now())
+);
+
+create or replace function public.set_pointcalc_app_config_updated_at()
+returns trigger
+language plpgsql
+as $$
+begin
+  new.updated_at = timezone('utc', now());
+  return new;
+end;
+$$;
+
+drop trigger if exists pointcalc_app_config_set_updated_at on public.pointcalc_app_config;
+create trigger pointcalc_app_config_set_updated_at
+before update on public.pointcalc_app_config
+for each row
+execute function public.set_pointcalc_app_config_updated_at();
+
+insert into public.pointcalc_app_config (
+  id,
+  config_version,
+  active_theme_name,
+  release_notes,
+  themes_json
+)
+values (
+  'default',
+  '1.0.0',
+  'default',
+  'Initial PointCalc config.',
+  '{}'::jsonb
+)
+on conflict (id) do nothing;
+
+alter table public.pointcalc_app_config enable row level security;
+
+drop policy if exists "pointcalc_app_config_read" on public.pointcalc_app_config;
+create policy "pointcalc_app_config_read"
+on public.pointcalc_app_config
+for select
+to authenticated
+using (true);
+
+revoke insert on public.pointcalc_app_config from anon, authenticated;
+revoke update on public.pointcalc_app_config from anon, authenticated;
+revoke delete on public.pointcalc_app_config from anon, authenticated;
