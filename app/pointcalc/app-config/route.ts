@@ -1,9 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import {
-  createPointCalcAnonClient,
-  createPointCalcUserClient,
-} from "@/lib/pointcalc-supabase";
+import { createPointCalcAnonClient } from "@/lib/pointcalc-supabase";
 
 export const dynamic = "force-dynamic";
 export const runtime = "nodejs";
@@ -14,36 +11,12 @@ export async function OPTIONS() {
 
 export async function GET(request: NextRequest) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader?.startsWith("Bearer ")) {
-      return NextResponse.json(
-        { error: "Unauthorized", message: "Missing bearer token." },
-        { status: 401 },
-      );
-    }
-
-    const accessToken = authHeader.slice(7);
-    const authClient = createPointCalcAnonClient();
-    const {
-      data: { user },
-      error: userError,
-    } = await authClient.auth.getUser(accessToken);
-
-    if (userError || !user) {
-      return NextResponse.json(
-        {
-          error: "Unauthorized",
-          message: userError?.message ?? "Invalid session.",
-        },
-        { status: 401 },
-      );
-    }
-
-    const client = createPointCalcUserClient(accessToken);
+    void request;
+    const client = createPointCalcAnonClient();
     const { data, error } = await client
       .from("pointcalc_app_config")
       .select(
-        "id, config_version, min_supported_app_version, latest_app_version, active_theme_name, release_notes, themes_json, updated_at",
+        "id, config_version, min_supported_app_version, latest_app_version, download_url, release_notes, updated_at",
       )
       .eq("id", "default")
       .maybeSingle();
