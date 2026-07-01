@@ -297,7 +297,7 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const walletGems = Number(wallet.gems_balance ?? wallet.coins ?? 0);
+    const walletGems = Number(wallet.balance ?? 0);
 
     // 12. Check if user has sufficient gems
     if (walletGems < amount) {
@@ -318,16 +318,13 @@ export async function POST(request: NextRequest) {
     }
 
     // 13. Begin transaction - Deduct from wallet
-    const oldBalance = Number(wallet.balance ?? 0);
-    const oldGemsBalance = walletGems;
-    const newGemsBalance = oldGemsBalance - amount;
+    const oldBalance = walletGems;
+    const newBalance = oldBalance - amount;
 
     const { error: walletUpdateError } = await supabaseAdmin
       .from('wallets')
       .update({
-        balance: 0,
-        gems_balance: newGemsBalance,
-        coins: Math.min(newGemsBalance, 2147483647),
+        balance: newBalance,
       })
       .eq('id', wallet.id);
 
@@ -359,9 +356,7 @@ export async function POST(request: NextRequest) {
         payment_status: 'completed',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
-        new_balance: 0,
-        old_gems_balance: oldGemsBalance,
-        new_gems_balance: newGemsBalance,
+        new_balance: newBalance,
         payment_metadata: {
           source: 'tournament_entry',
           entry_fee_gems: amount,
@@ -376,8 +371,6 @@ export async function POST(request: NextRequest) {
         .from('wallets')
         .update({
           balance: oldBalance,
-          gems_balance: oldGemsBalance,
-          coins: Math.min(oldGemsBalance, 2147483647),
         })
         .eq('id', wallet.id);
 
@@ -433,8 +426,6 @@ export async function POST(request: NextRequest) {
         .from('wallets')
         .update({
           balance: oldBalance,
-          gems_balance: oldGemsBalance,
-          coins: Math.min(oldGemsBalance, 2147483647),
         })
         .eq('id', wallet.id);
 
@@ -487,8 +478,7 @@ export async function POST(request: NextRequest) {
           team_name: participant.team_name,
           slot_number: participant.slot_number,
           slots_remaining: updatedSlotsLeftAfterReservation,
-          new_wallet_balance: 0,
-          new_gems_balance: newGemsBalance
+          new_wallet_balance: newBalance
         }
       },
       { status: 200 }

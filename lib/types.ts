@@ -28,8 +28,6 @@ export interface Wallet {
   id: string;
   user_id: string;
   balance: number;
-  coins?: number;
-  gems_balance?: number;
   allow_withdrawals: boolean;
   allow_deposits: boolean;
 }
