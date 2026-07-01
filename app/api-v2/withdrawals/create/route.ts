@@ -141,22 +141,27 @@ export async function POST(request: NextRequest) {
         ? body.amount
         : Number.parseFloat(body.amount);
 
+    const withdrawalMethod = body.withdrawalMethod;
+    const minimumWithdrawal = withdrawalMethod === 'GIFTCARD' ? 10 : 1;
+
     if (
       Number.isNaN(withdrawAmount) ||
       !Number.isFinite(withdrawAmount) ||
-      withdrawAmount < 1 ||
+      withdrawAmount < minimumWithdrawal ||
       withdrawAmount > 50000
     ) {
       return NextResponse.json(
         {
           error: 'Invalid amount',
-          message: 'Minimum withdrawal is ₹1.',
+          message:
+            withdrawalMethod === 'GIFTCARD'
+              ? 'Minimum Google Play redeem code is ₹10.'
+              : 'Minimum withdrawal is ₹1.',
         },
         { status: 400 },
       );
     }
 
-    const withdrawalMethod = body.withdrawalMethod;
     const accountDetails =
       body.accountDetails && typeof body.accountDetails === 'object'
         ? (body.accountDetails as Record<string, unknown>)
