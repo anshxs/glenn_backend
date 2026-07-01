@@ -261,14 +261,6 @@ export async function POST(request: NextRequest) {
         withdrawal_method: withdrawalMethod,
         withdrawal_account_details: accountDetails,
         expected_payout_date: expectedPayoutDate.toISOString(),
-        payment_metadata: {
-          withdrawal_method: withdrawalMethod,
-          platform_fee: PLATFORM_FEE,
-          net_amount: withdrawAmount,
-          total_deduction: totalDeduction,
-          requested_at: new Date().toISOString(),
-          description: `${withdrawalMethod} withdrawal of ₹${withdrawAmount}`,
-        },
       })
       .select()
       .single();

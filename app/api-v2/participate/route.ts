@@ -349,18 +349,12 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id: user_id,
         wallet_id: wallet.id,
-        amount: -amount, // Negative because it's a deduction
-        gems_amount: -amount,
-        currency: 'GEMS',
+        amount: -amount,
         transaction_type: 'TOURNAMENT_ENTRY',
         payment_status: 'completed',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
         new_balance: newBalance,
-        payment_metadata: {
-          source: 'tournament_entry',
-          entry_fee_gems: amount,
-        },
       })
       .select()
       .single();
