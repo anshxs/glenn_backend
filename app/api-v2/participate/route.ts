@@ -297,8 +297,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // 12. Check if user has sufficient balance
-    if (wallet.balance < amount) {
+    const walletGems = Number(wallet.gems_balance ?? wallet.coins ?? 0);
+
+    // 12. Check if user has sufficient gems
+    if (walletGems < amount) {
       if (reservedSlots > 0 && reservedTournamentId) {
         await supabaseAdmin
           .from('tournaments')
@@ -308,20 +310,25 @@ export async function POST(request: NextRequest) {
       }
       return NextResponse.json(
         { 
-          error: 'Insufficient balance', 
-          message: `Insufficient funds in wallet. Required: ${amount}, Available: ${wallet.balance}` 
+          error: 'Insufficient gems', 
+          message: `Insufficient gems. Required: ${amount}, Available: ${walletGems}` 
         },
         { status: 400 }
       );
     }
 
     // 13. Begin transaction - Deduct from wallet
-    const oldBalance = wallet.balance;
-    const newBalance = oldBalance - amount;
+    const oldBalance = Number(wallet.balance ?? 0);
+    const oldGemsBalance = walletGems;
+    const newGemsBalance = oldGemsBalance - amount;
 
     const { error: walletUpdateError } = await supabaseAdmin
       .from('wallets')
-      .update({ balance: newBalance })
+      .update({
+        balance: 0,
+        gems_balance: newGemsBalance,
+        coins: Math.min(newGemsBalance, 2147483647),
+      })
       .eq('id', wallet.id);
 
     if (walletUpdateError) {
@@ -346,11 +353,19 @@ export async function POST(request: NextRequest) {
         user_id: user_id,
         wallet_id: wallet.id,
         amount: -amount, // Negative because it's a deduction
+        gems_amount: -amount,
+        currency: 'GEMS',
         transaction_type: 'TOURNAMENT_ENTRY',
         payment_status: 'completed',
         related_tournament_id: tournament_id,
         old_balance: oldBalance,
-        new_balance: newBalance
+        new_balance: 0,
+        old_gems_balance: oldGemsBalance,
+        new_gems_balance: newGemsBalance,
+        payment_metadata: {
+          source: 'tournament_entry',
+          entry_fee_gems: amount,
+        },
       })
       .select()
       .single();
@@ -359,7 +374,11 @@ export async function POST(request: NextRequest) {
       // Rollback wallet update
       await supabaseAdmin
         .from('wallets')
-        .update({ balance: oldBalance })
+        .update({
+          balance: oldBalance,
+          gems_balance: oldGemsBalance,
+          coins: Math.min(oldGemsBalance, 2147483647),
+        })
         .eq('id', wallet.id);
 
       if (reservedSlots > 0 && reservedTournamentId) {
@@ -412,7 +431,11 @@ export async function POST(request: NextRequest) {
 
       await supabaseAdmin
         .from('wallets')
-        .update({ balance: oldBalance })
+        .update({
+          balance: oldBalance,
+          gems_balance: oldGemsBalance,
+          coins: Math.min(oldGemsBalance, 2147483647),
+        })
         .eq('id', wallet.id);
 
       if (reservedSlots > 0 && reservedTournamentId) {
@@ -464,7 +487,8 @@ export async function POST(request: NextRequest) {
           team_name: participant.team_name,
           slot_number: participant.slot_number,
           slots_remaining: updatedSlotsLeftAfterReservation,
-          new_wallet_balance: newBalance
+          new_wallet_balance: 0,
+          new_gems_balance: newGemsBalance
         }
       },
       { status: 200 }
