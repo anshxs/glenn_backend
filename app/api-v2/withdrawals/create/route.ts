@@ -148,6 +148,7 @@ export async function POST(request: NextRequest) {
     if (
       Number.isNaN(withdrawAmount) ||
       !Number.isFinite(withdrawAmount) ||
+      !Number.isInteger(withdrawAmount) ||
       withdrawAmount < minimumWithdrawal ||
       withdrawAmount > 50000
     ) {
@@ -155,6 +156,9 @@ export async function POST(request: NextRequest) {
         {
           error: 'Invalid amount',
           message:
+            !Number.isInteger(withdrawAmount)
+              ? 'Withdrawal amount must be a whole rupee amount.'
+              :
             withdrawalMethod === 'GIFTCARD'
               ? 'Minimum Google Play redeem code is ₹10.'
               : 'Minimum withdrawal is ₹1.',
