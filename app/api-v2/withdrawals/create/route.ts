@@ -15,6 +15,7 @@ export const runtime = 'nodejs';
 
 const VALID_WITHDRAWAL_METHODS = ['UPI', 'BANK', 'GIFTCARD'] as const;
 const PLATFORM_FEE = 1.0;
+const GEM_RATE = 100;
 
 type WithdrawalMethod = (typeof VALID_WITHDRAWAL_METHODS)[number];
 
@@ -191,11 +192,17 @@ export async function POST(request: NextRequest) {
       textField(accountDetails.giftCardType, 80) !== 'Google Play'
     ) {
       return NextResponse.json(
-        { error: 'Invalid gift card', message: 'Only Google Play redemption is supported.' },
+        {
+          error: 'Invalid gift card',
+          message: 'Only Google Play redemption is supported.',
+        },
         { status: 400 },
       );
     }
+    const withdrawalGems = Math.round(withdrawAmount * GEM_RATE);
+    const platformFeeGems = Math.round(PLATFORM_FEE * GEM_RATE);
     const totalDeduction = withdrawAmount + PLATFORM_FEE;
+    const totalDeductionGems = withdrawalGems + platformFeeGems;
 
     const { data: wallet, error: walletError } = await supabaseAdmin
       .from('wallets')
@@ -229,22 +236,25 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    if (Number(wallet.balance) < totalDeduction) {
+    if (Number(wallet.balance) < totalDeductionGems) {
       return NextResponse.json(
         {
           error: 'Insufficient balance',
-          message: `Insufficient balance. Required: ₹${totalDeduction.toFixed(2)} including ₹${PLATFORM_FEE.toFixed(2)} fee.`,
+          message: `Insufficient balance. Required: ${totalDeductionGems} gems (₹${totalDeduction.toFixed(2)} including ₹${PLATFORM_FEE.toFixed(2)} fee).`,
         },
         { status: 400 },
       );
     }
 
-    const maxWithdrawAmount = Number(wallet.balance) - PLATFORM_FEE;
+    const maxWithdrawAmount = Math.max(
+      0,
+      Math.floor((Number(wallet.balance) - platformFeeGems) / GEM_RATE),
+    );
     if (withdrawAmount > maxWithdrawAmount) {
       return NextResponse.json(
         {
           error: 'Invalid amount',
-          message: `Maximum withdrawal is ₹${maxWithdrawAmount.toFixed(2)} so the ₹${PLATFORM_FEE.toFixed(2)} platform fee is also covered.`,
+          message: `Maximum withdrawal is ₹${maxWithdrawAmount.toFixed(2)} so the ₹${PLATFORM_FEE.toFixed(2)} platform fee (${platformFeeGems} gems) is also covered.`,
         },
         { status: 400 },
       );
@@ -257,14 +267,20 @@ export async function POST(request: NextRequest) {
       .insert({
         user_id: auth.user.id,
         wallet_id: wallet.id,
-        amount: -withdrawAmount,
+        amount: -withdrawalGems,
         transaction_type: 'WITHDRAWAL',
         payment_status: 'pending',
         old_balance: wallet.balance,
-        new_balance: Number(wallet.balance) - totalDeduction,
-        platform_fee: PLATFORM_FEE,
+        new_balance: Number(wallet.balance) - totalDeductionGems,
+        platform_fee: platformFeeGems,
         withdrawal_method: withdrawalMethod,
-        withdrawal_account_details: accountDetails,
+        withdrawal_account_details: {
+          ...accountDetails,
+          payout_amount_inr: withdrawAmount,
+          platform_fee_inr: PLATFORM_FEE,
+          total_deduction_gems: totalDeductionGems,
+          gem_rate: GEM_RATE,
+        },
         expected_payout_date: expectedPayoutDate.toISOString(),
       })
       .select()
@@ -284,11 +300,11 @@ export async function POST(request: NextRequest) {
     const { data: updatedWallet, error: updateError } = await supabaseAdmin
       .from('wallets')
       .update({
-        balance: Number(wallet.balance) - totalDeduction,
+        balance: Number(wallet.balance) - totalDeductionGems,
         last_updated: new Date().toISOString(),
       })
       .eq('id', wallet.id)
-      .gte('balance', totalDeduction)
+      .gte('balance', totalDeductionGems)
       .select('balance')
       .maybeSingle();
 
@@ -314,6 +330,7 @@ export async function POST(request: NextRequest) {
         amount: withdrawAmount,
         platformFee: PLATFORM_FEE,
         totalDeduction,
+        totalDeductionGems,
         withdrawalMethod,
         expectedPayoutDate: expectedPayoutDate.toISOString(),
         status: 'PENDING',
