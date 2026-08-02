@@ -15,6 +15,12 @@ export const runtime = 'nodejs';
 
 type UserDataUpdateBody = Record<string, unknown>;
 
+type GameProfileInput = {
+  game_id: string;
+  player_uid: string;
+  player_name: string;
+};
+
 const ALLOWED_FIELDS = new Set([
   'name',
   'ffuid',
@@ -96,6 +102,36 @@ function cleanTimestamp(value: unknown): string | null {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
+function cleanGameProfiles(value: unknown): GameProfileInput[] | null {
+  if (value == null) return null;
+  if (!Array.isArray(value) || value.length === 0 || value.length > 20) {
+    throw new Error('Select at least one valid game.');
+  }
+
+  const profiles = value.map((entry) => {
+    if (!entry || typeof entry !== 'object') {
+      throw new Error('Invalid game profile.');
+    }
+    const profile = entry as Record<string, unknown>;
+    const gameId = cleanText(profile.game_id, 36);
+    const playerUid = cleanText(profile.player_uid, 80);
+    const playerName = cleanText(profile.player_name, 80);
+    if (!gameId || !playerUid || !playerName) {
+      throw new Error('Every selected game needs a player UID and name.');
+    }
+    return {
+      game_id: gameId,
+      player_uid: playerUid,
+      player_name: playerName,
+    };
+  });
+
+  if (new Set(profiles.map((profile) => profile.game_id)).size !== profiles.length) {
+    throw new Error('A game can only be selected once.');
+  }
+  return profiles;
+}
+
 function sanitizeUpdate(input: UserDataUpdateBody) {
   const update: Record<string, unknown> = {};
 
@@ -171,22 +207,56 @@ export async function PATCH(request: NextRequest) {
     const maintenanceResponse = await blockApiV2IfMaintenance();
     if (maintenanceResponse) return maintenanceResponse;
 
-    const update = sanitizeUpdate(parsed.data ?? {});
-    if (Object.keys(update).length === 0) {
+    const input = { ...(parsed.data ?? {}) };
+    const gameProfiles = cleanGameProfiles(input.game_profiles);
+    const primaryGameId = cleanText(input.primary_game_id, 36);
+    delete input.game_profiles;
+    delete input.primary_game_id;
+
+    if ((gameProfiles == null) !== (primaryGameId == null)) {
+      throw new Error('Game profiles and primary game must be submitted together.');
+    }
+
+    const update = sanitizeUpdate(input);
+    if (Object.keys(update).length === 0 && gameProfiles == null) {
       return NextResponse.json(
         { error: 'Invalid request', message: 'No user fields to update.' },
         { status: 400 },
       );
     }
 
-    update.updated_at = new Date().toISOString();
+    let data: Record<string, unknown> | null = null;
+    let error: { message: string } | null = null;
 
-    const { data, error } = await supabaseAdmin
-      .from('sensitive_userdata')
-      .update(update)
-      .eq('id', auth.user.id)
-      .select()
-      .maybeSingle();
+    if (Object.keys(update).length > 0) {
+      update.updated_at = new Date().toISOString();
+      const result = await supabaseAdmin
+        .from('sensitive_userdata')
+        .update(update)
+        .eq('id', auth.user.id)
+        .select()
+        .maybeSingle();
+      data = result.data;
+      error = result.error;
+    }
+
+    if (!error && gameProfiles != null && primaryGameId != null) {
+      const gameResult = await supabaseAdmin.rpc('set_user_game_profiles', {
+        p_user_id: auth.user.id,
+        p_profiles: gameProfiles,
+        p_primary_game_id: primaryGameId,
+      });
+      error = gameResult.error;
+      if (!error) {
+        const refreshed = await supabaseAdmin
+          .from('sensitive_userdata')
+          .select()
+          .eq('id', auth.user.id)
+          .maybeSingle();
+        data = refreshed.data;
+        error = refreshed.error;
+      }
+    }
 
     if (error || !data) {
       return NextResponse.json(
