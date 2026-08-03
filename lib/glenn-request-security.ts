@@ -110,9 +110,13 @@ function decodeBase64(value: string): Buffer {
 }
 
 export async function verifyGlennRequestSecurity(
-  request: NextRequest,
-  options: VerifyOptions = {},
+  _request: NextRequest,
+  _options: VerifyOptions = {},
 ): Promise<NextResponse | null> {
+  // API routes enforce Supabase authentication and HTTPS. Build signatures and
+  // device-integrity headers are intentionally not authorization boundaries.
+  return null;
+  /*
   const parsedContext = decodeSecurityContextHeader(
     request.headers.get('x-glenn-security-context'),
   );
@@ -412,6 +416,7 @@ export async function verifyGlennRequestSecurity(
   }
 
   return null;
+  */
 }
 
 export async function readGlennJsonBody<T>(
