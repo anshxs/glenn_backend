@@ -77,15 +77,6 @@ function isGlennDebugAllowed(): boolean {
   );
 }
 
-function normalizeFingerprint(value: string | null | undefined): string | null {
-  const normalized = value?.replace(/:/g, '').trim().toUpperCase() ?? '';
-  return normalized ? normalized : null;
-}
-
-function getExpectedGlennReleaseFingerprint(): string | null {
-  return normalizeFingerprint(process.env.GLENN_RELEASE_SIGNING_CERT_SHA256 ?? process.env.GLENN_SIGNING_CERT_SHA256 ?? null);
-}
-
 function isSupportedBuildHashValue(buildHash: string | null | undefined): boolean {
   const allowed = (
     process.env.GLENN_ALLOWED_BUILD_HASHES ?? process.env.GLENN_APP_BUILD_HASH ?? ''
@@ -145,33 +136,6 @@ export async function verifyGlennRequestSecurity(
     parsedContext?.isDebuggerAttached === true ||
     parsedContext?.is_debugged === true ||
     parsedContext?.isDebugged === true;
-  const clientReportedSignatureMismatch =
-    parsedContext?.signature_mismatch === true ||
-    parsedContext?.signatureMismatch === true ||
-    parsedContext?.signature_valid === false ||
-    parsedContext?.signatureValid === false;
-  const runtimeSignature = normalizeFingerprint(
-    typeof parsedContext?.signature_sha256 === 'string'
-      ? parsedContext.signature_sha256
-      : null,
-  );
-  const clientExpectedSignature = normalizeFingerprint(
-    typeof parsedContext?.signature_expected_sha256 === 'string'
-      ? parsedContext.signature_expected_sha256
-      : null,
-  );
-  const serverExpectedSignature = getExpectedGlennReleaseFingerprint();
-  const signatureExpectedMismatch =
-    !!serverExpectedSignature &&
-    !!clientExpectedSignature &&
-    serverExpectedSignature !== clientExpectedSignature;
-  const serverDetectedSignatureMismatch =
-    !!serverExpectedSignature &&
-    (!runtimeSignature || runtimeSignature !== serverExpectedSignature);
-  const signatureMismatch =
-    clientReportedSignatureMismatch ||
-    signatureExpectedMismatch ||
-    serverDetectedSignatureMismatch;
   const isDebugRequest = isGlennDebugRequest(request, parsedContext);
   const debugAllowed = isDebugRequest && isGlennDebugAllowed();
   const allowAnyBuildHash = options.allowAnyBuildHash || debugAllowed;
@@ -194,20 +158,6 @@ export async function verifyGlennRequestSecurity(
         message: 'This backend is not configured to accept Glenn debug builds.',
       },
       { status: 403 },
-    );
-  }
-
-  if (
-    !debugAllowed &&
-    process.env.NODE_ENV !== 'development' &&
-    !serverExpectedSignature
-  ) {
-    return NextResponse.json(
-      {
-        error: 'Server misconfigured',
-        message: 'Glenn signing verification is not configured on the backend.',
-      },
-      { status: 500 },
     );
   }
 
@@ -378,26 +328,19 @@ export async function verifyGlennRequestSecurity(
     }
   }
 
-  if (!debugAllowed && (isDebuggerAttached || signatureMismatch)) {
+  if (!debugAllowed && isDebuggerAttached) {
     await flagOrganiserSecurityEvent({
       app: 'glenn',
       request,
       endpoint: request.nextUrl.pathname,
-      flagType: signatureMismatch
-        ? 'signing_certificate_mismatch'
-        : 'debugger_attached',
-      reason: signatureMismatch
-        ? 'The Glenn app signature did not match any allowed release certificate.'
-        : 'A debugger was detected on the Glenn runtime.',
+      flagType: 'debugger_attached',
+      reason: 'A debugger was detected on the Glenn runtime.',
       severity: 'critical',
       shouldBlock: true,
       deviceId,
       securityContext: parsedContext,
       metadata: {
         method: request.method,
-        signature_sha256: runtimeSignature,
-        signature_expected_sha256: clientExpectedSignature,
-        signature_server_expected_sha256: serverExpectedSignature,
         build_hash: buildHash,
       },
     });
