@@ -24,6 +24,7 @@ const ALLOWED_CATEGORIES = new Set([
   'idea',
   'bug',
   'feature_request',
+  'child_safety',
   'other',
 ]);
 
