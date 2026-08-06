@@ -42,6 +42,7 @@ const ALLOWED_FIELDS = new Set([
   'location_lat',
   'location_lng',
   'location_updated_at',
+  'location_sharing_enabled',
   'team_roles',
   'team_instagram_url',
   'team_youtube_url',
@@ -156,7 +157,12 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
       continue;
     }
 
-    if (key === 'show_tournaments' || key === 'isonline' || key === 'team_builder_enabled') {
+    if (
+      key === 'show_tournaments' ||
+      key === 'isonline' ||
+      key === 'team_builder_enabled' ||
+      key === 'location_sharing_enabled'
+    ) {
       const bool = cleanBoolean(value);
       if (bool == null) throw new Error(`Invalid boolean for ${key}`);
       update[key] = bool;
@@ -164,6 +170,10 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
     }
 
     if (key === 'location_lat' || key === 'location_lng') {
+      if (value == null) {
+        update[key] = null;
+        continue;
+      }
       const number = cleanNumber(value);
       if (number == null) throw new Error(`Invalid number for ${key}`);
       update[key] = number;
@@ -171,6 +181,10 @@ function sanitizeUpdate(input: UserDataUpdateBody) {
     }
 
     if (key === 'lastseen' || key === 'location_updated_at') {
+      if (value == null && key === 'location_updated_at') {
+        update[key] = null;
+        continue;
+      }
       const timestamp = cleanTimestamp(value);
       if (timestamp == null) throw new Error(`Invalid timestamp for ${key}`);
       update[key] = timestamp;
