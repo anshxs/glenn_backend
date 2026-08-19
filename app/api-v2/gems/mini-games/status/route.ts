@@ -85,7 +85,7 @@ export async function POST(request: NextRequest) {
         game_type: gameType,
         today,
         plays_used: playsUsed,
-        plays_remaining: Math.max(0, 3 - playsUsed),
+        plays_remaining: Math.max(0, 1 - playsUsed),
       },
       userId: auth.user.id,
     });
