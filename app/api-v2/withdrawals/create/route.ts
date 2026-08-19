@@ -143,6 +143,18 @@ export async function POST(request: NextRequest) {
         : Number.parseFloat(body.amount);
 
     const withdrawalMethod = body.withdrawalMethod;
+
+    if (withdrawalMethod === 'UPI' || withdrawalMethod === 'BANK') {
+      return NextResponse.json(
+        {
+          error: 'Method disabled',
+          message:
+            'UPI and Bank transfers are temporarily unavailable. Please use Gift Card (Google Play code) instead.',
+        },
+        { status: 400 },
+      );
+    }
+
     const minimumWithdrawal = withdrawalMethod === 'GIFTCARD' ? 10 : 1;
 
     if (
@@ -167,29 +179,35 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Enforce 3 monthly withdrawals limit
+    const now = new Date();
+    const startOfMonth = new Date(
+      Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1),
+    ).toISOString();
+
+    const { count: monthlyCount, error: countError } = await supabaseAdmin
+      .from('transactions')
+      .select('id', { count: 'exact', head: true })
+      .eq('user_id', auth.user.id)
+      .eq('transaction_type', 'WITHDRAWAL')
+      .gte('created_at', startOfMonth)
+      .not('payment_status', 'in', '("failed","cancelled","rejected")');
+
+    if (!countError && (monthlyCount ?? 0) >= 3) {
+      return NextResponse.json(
+        {
+          error: 'Monthly limit reached',
+          message:
+            'You have reached the monthly limit of 3 withdrawals. You can withdraw again next month.',
+        },
+        { status: 400 },
+      );
+    }
+
     const accountDetails =
       body.accountDetails && typeof body.accountDetails === 'object'
         ? (body.accountDetails as Record<string, unknown>)
         : {};
-
-    if (withdrawalMethod === 'UPI' && !textField(accountDetails.upiId, 80)) {
-      return NextResponse.json(
-        { error: 'Invalid UPI', message: 'Enter a valid UPI ID.' },
-        { status: 400 },
-      );
-    }
-
-    if (
-      withdrawalMethod === 'BANK' &&
-      (!textField(accountDetails.accountNumber, 40) ||
-        !textField(accountDetails.ifscCode, 20) ||
-        !textField(accountDetails.accountHolderName, 100))
-    ) {
-      return NextResponse.json(
-        { error: 'Invalid bank details', message: 'Enter valid bank details.' },
-        { status: 400 },
-      );
-    }
 
     if (
       withdrawalMethod === 'GIFTCARD' &&
