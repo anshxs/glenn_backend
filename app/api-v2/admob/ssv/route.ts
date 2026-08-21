@@ -5,6 +5,7 @@ import { supabaseAdmin } from '@/lib/supabase';
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
+const TASKS_AD_UNIT = 'ca-app-pub-5483534954389996/1546340327';
 const SCRATCH_AD_UNIT = 'ca-app-pub-5483534954389996/8722122769';
 const SPINNER_AD_UNIT = 'ca-app-pub-5483534954389996/6798667004';
 
@@ -44,11 +45,25 @@ export async function GET(request: NextRequest) {
       }
     }
 
-    // Infer game type
-    let gameType: 'spin' | 'scratch' = 'spin';
-    if (customData === 'scratch' || adUnit === SCRATCH_AD_UNIT || adUnit.includes('8722122769')) {
+    // Infer game/reward type
+    let gameType: string = 'spin';
+    if (
+      customData?.startsWith('task') ||
+      adUnit === TASKS_AD_UNIT ||
+      adUnit.includes('1546340327')
+    ) {
+      gameType = 'task';
+    } else if (
+      customData === 'scratch' ||
+      adUnit === SCRATCH_AD_UNIT ||
+      adUnit.includes('8722122769')
+    ) {
       gameType = 'scratch';
-    } else if (customData === 'spin' || adUnit === SPINNER_AD_UNIT || adUnit.includes('6798667004')) {
+    } else if (
+      customData === 'spin' ||
+      adUnit === SPINNER_AD_UNIT ||
+      adUnit.includes('6798667004')
+    ) {
       gameType = 'spin';
     }
 
