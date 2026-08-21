@@ -48,6 +48,11 @@ export async function GET(request: NextRequest) {
     // Infer game/reward type
     let gameType: string = 'spin';
     if (
+      customData === 'daily_login' ||
+      customData?.startsWith('daily_login')
+    ) {
+      gameType = 'daily_login';
+    } else if (
       customData?.startsWith('task') ||
       adUnit === TASKS_AD_UNIT ||
       adUnit.includes('1546340327')
