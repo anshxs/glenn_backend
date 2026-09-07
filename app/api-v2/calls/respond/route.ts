@@ -4,20 +4,56 @@ import { supabaseAdmin } from '@/lib/supabase';
 export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
-    const { callId, recipientId, action } = body; // action: 'accepted' | 'declined' | 'ended' | 'missed'
+    const {
+      callId,
+      recipientId,
+      action,
+      status,
+      durationSeconds,
+      duration_seconds,
+    } = body;
+    const resolvedStatus = status || action; // 'connected' | 'declined' | 'ended' | 'missed'
 
-    if (!callId || !action) {
+    if (!callId || !resolvedStatus) {
       return NextResponse.json(
-        { error: 'Missing required parameters: callId, action' },
+        { error: 'Missing required parameters: callId, status' },
         { status: 400 }
       );
     }
 
-    // Notify other party via OneSignal data message or cancel notification
+    // 1. Update call_logs table in Supabase
+    try {
+      const updateData: Record<string, any> = { status: resolvedStatus };
+      if (
+        resolvedStatus === 'ended' ||
+        resolvedStatus === 'declined' ||
+        resolvedStatus === 'missed'
+      ) {
+        updateData.ended_at = new Date().toISOString();
+        const duration = durationSeconds ?? duration_seconds;
+        if (typeof duration === 'number') {
+          updateData.duration_seconds = duration;
+        }
+      }
+
+      await supabaseAdmin
+        .from('call_logs')
+        .update(updateData)
+        .eq('call_id', callId);
+    } catch (logErr) {
+      console.warn('Could not update call_logs record:', logErr);
+    }
+
+    // 2. Notify other party via OneSignal data message if ended or declined
     const appId = process.env.ONESIGNAL_APP_ID;
     const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
 
-    if (recipientId && appId && restApiKey && (action === 'declined' || action === 'ended')) {
+    if (
+      recipientId &&
+      appId &&
+      restApiKey &&
+      (resolvedStatus === 'declined' || resolvedStatus === 'ended')
+    ) {
       try {
         await fetch('https://onesignal.com/api/v1/notifications', {
           method: 'POST',

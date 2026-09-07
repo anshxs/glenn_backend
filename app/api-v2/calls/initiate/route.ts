@@ -36,7 +36,21 @@ export async function POST(req: NextRequest) {
       canPublishData: true,
     });
 
-    // 2. Fetch callee's OneSignal Player ID (if available)
+    // 2. Insert record into call_logs table
+    try {
+      await supabaseAdmin.from('call_logs').insert({
+        call_id: callId,
+        caller_id: callerId,
+        callee_id: calleeId,
+        call_type: callType,
+        status: 'ringing',
+        started_at: new Date().toISOString(),
+      });
+    } catch (logErr) {
+      console.warn('Could not insert call_log record:', logErr);
+    }
+
+    // 3. Fetch callee's OneSignal Player ID (if available)
     let calleePlayerId: string | null = null;
     try {
       const { data: notifData } = await supabaseAdmin
