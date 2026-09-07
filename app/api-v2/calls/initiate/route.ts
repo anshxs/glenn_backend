@@ -61,6 +61,8 @@ export async function POST(req: NextRequest) {
       caller_id: callerId,
       caller_name: callerName,
       caller_avatar: callerAvatar || '',
+      sender_avatarurl: callerAvatar || '',
+      large_icon: callerAvatar || '',
       call_type: callType,
       room_name: roomName,
       token: calleeToken,
@@ -82,6 +84,8 @@ export async function POST(req: NextRequest) {
             headings: { en: notifTitle },
             contents: { en: notifMessage },
             data: callData,
+            large_icon: callerAvatar || '',
+            sender_avatarurl: callerAvatar || '',
             buttons: [
               { id: 'accept', text: 'Accept' },
               { id: 'decline', text: 'Decline' },
@@ -101,6 +105,7 @@ export async function POST(req: NextRequest) {
     }
 
     // 4. Trigger Supabase push_notifications Edge Function
+    let edgeSuccess = false;
     if (userNotifId) {
       try {
         const edgeUrl = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/push_notifications`;
@@ -108,69 +113,82 @@ export async function POST(req: NextRequest) {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
-            Authorization: `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
+            'apikey': process.env.SUPABASE_SERVICE_ROLE_KEY || '',
+            'Authorization': `Bearer ${process.env.SUPABASE_SERVICE_ROLE_KEY}`,
           },
           body: JSON.stringify({ notification_id: userNotifId }),
         });
-        console.log('Supabase Edge Function push triggered:', edgeRes.status);
+        const edgeText = await edgeRes.text();
+        console.log('Supabase Edge Function push triggered:', edgeRes.status, edgeText);
+        if (edgeRes.ok && edgeText.trim() === 'done') {
+          edgeSuccess = true;
+        }
       } catch (edgeErr) {
         console.warn('Error calling push_notifications edge function:', edgeErr);
       }
     }
 
-    // 5. Fallback: Direct OneSignal API dispatch (ensures delivery if edge function is delayed)
-    const appId = process.env.ONESIGNAL_APP_ID;
-    const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
+    // 5. Fallback: Direct OneSignal API dispatch if Edge Function didn't deliver (e.g. missing player id)
+    if (!edgeSuccess) {
+      const appId = process.env.ONESIGNAL_APP_ID;
+      const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
 
-    if (appId && restApiKey) {
-      // Query player ID if needed
-      let calleePlayerId: string | null = null;
-      try {
-        const { data: notifData } = await supabaseAdmin
-          .from('notifications')
-          .select('onesignal_player_id')
-          .eq('user_id', calleeId)
-          .maybeSingle();
-        calleePlayerId = notifData?.onesignal_player_id || null;
-      } catch (dbErr) {
-        console.warn('Could not query player ID from database:', dbErr);
-      }
-
-      const directPayload: Record<string, any> = {
-        app_id: appId,
-        headings: { en: notifTitle },
-        contents: { en: notifMessage },
-        data: callData,
-        buttons: [
-          { id: 'accept', text: 'Accept' },
-          { id: 'decline', text: 'Decline' },
-        ],
-        priority: 10,
-      };
-
-      if (calleePlayerId) {
-        directPayload.include_player_ids = [calleePlayerId];
-      } else {
-        directPayload.include_aliases = { external_id: [calleeId] };
-        directPayload.target_channel = 'push';
-      }
-
-      try {
-        const osRes = await fetch('https://onesignal.com/api/v1/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Basic ${restApiKey}`,
-          },
-          body: JSON.stringify(directPayload),
-        });
-
-        if (!osRes.ok) {
-          const errText = await osRes.text();
-          console.warn('Direct OneSignal notification failed:', errText);
+      if (appId && restApiKey) {
+        // Query player ID if available
+        let calleePlayerId: string | null = null;
+        try {
+          const { data: notifData } = await supabaseAdmin
+            .from('notifications')
+            .select('onesignal_player_id')
+            .eq('user_id', calleeId)
+            .maybeSingle();
+          calleePlayerId = notifData?.onesignal_player_id || null;
+        } catch (dbErr) {
+          console.warn('Could not query player ID from database:', dbErr);
         }
-      } catch (pushErr) {
-        console.warn('Error sending direct OneSignal notification:', pushErr);
+
+        const directPayload: Record<string, any> = {
+          app_id: appId,
+          headings: { en: notifTitle },
+          contents: { en: notifMessage },
+          data: callData,
+          buttons: [
+            { id: 'accept', text: 'Accept' },
+            { id: 'decline', text: 'Decline' },
+          ],
+          priority: 10,
+        };
+
+        if (callerAvatar) {
+          directPayload.large_icon = callerAvatar;
+        }
+
+        if (calleePlayerId) {
+          directPayload.include_player_ids = [calleePlayerId];
+        } else {
+          directPayload.include_aliases = { external_id: [calleeId] };
+          directPayload.target_channel = 'push';
+        }
+
+        try {
+          const osRes = await fetch('https://onesignal.com/api/v1/notifications', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              Authorization: `Basic ${restApiKey}`,
+            },
+            body: JSON.stringify(directPayload),
+          });
+
+          if (!osRes.ok) {
+            const errText = await osRes.text();
+            console.warn('Direct OneSignal notification fallback failed:', errText);
+          } else {
+            console.log('Direct OneSignal notification fallback sent successfully');
+          }
+        } catch (pushErr) {
+          console.warn('Error sending direct OneSignal notification fallback:', pushErr);
+        }
       }
     }
 
