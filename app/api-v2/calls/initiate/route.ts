@@ -121,6 +121,7 @@ export async function POST(req: NextRequest) {
         headings: { en: notifTitle },
         contents: { en: notifMessage },
         data: callData,
+        content_available: true,
         android_channel_id: 'incoming_calls',
         android_sound: 'ringtone',
         ios_sound: 'ringtone.mp3',
