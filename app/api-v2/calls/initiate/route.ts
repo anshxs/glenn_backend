@@ -67,7 +67,6 @@ export async function POST(req: NextRequest) {
       token: calleeToken,
       livekit_url: livekitUrl,
       screen: 'call',
-      android_channel_id: 'incoming_calls',
     };
 
     // 4. Save notification in database with sent: true so database triggers do NOT send a duplicate push
@@ -84,7 +83,6 @@ export async function POST(req: NextRequest) {
           data: callData,
           large_icon: callerAvatar || '',
           sender_avatarurl: callerAvatar || '',
-          android_channel_id: 'incoming_calls',
           android_sound: 'ringtone',
           ios_sound: 'ringtone.mp3',
           buttons: [
@@ -122,7 +120,6 @@ export async function POST(req: NextRequest) {
         contents: { en: notifMessage },
         data: callData,
         content_available: true,
-        android_channel_id: 'incoming_calls',
         android_sound: 'ringtone',
         ios_sound: 'ringtone.mp3',
         priority: 10,
@@ -131,6 +128,10 @@ export async function POST(req: NextRequest) {
           { id: 'decline', text: 'Decline' },
         ],
       };
+
+      if (process.env.ONESIGNAL_CALL_CHANNEL_ID) {
+        directPayload.android_channel_id = process.env.ONESIGNAL_CALL_CHANNEL_ID;
+      }
 
       if (callerAvatar) {
         directPayload.large_icon = callerAvatar;
