@@ -86,6 +86,8 @@ export async function POST(req: NextRequest) {
             data: callData,
             large_icon: callerAvatar || '',
             sender_avatarurl: callerAvatar || '',
+            android_sound: 'ringtone',
+            ios_sound: 'ringtone.mp3',
             buttons: [
               { id: 'accept', text: 'Accept' },
               { id: 'decline', text: 'Decline' },
@@ -152,6 +154,8 @@ export async function POST(req: NextRequest) {
           headings: { en: notifTitle },
           contents: { en: notifMessage },
           data: callData,
+          android_sound: 'ringtone',
+          ios_sound: 'ringtone.mp3',
           buttons: [
             { id: 'accept', text: 'Accept' },
             { id: 'decline', text: 'Decline' },
