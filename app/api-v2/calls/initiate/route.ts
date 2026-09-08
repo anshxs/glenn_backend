@@ -134,34 +134,36 @@ export async function POST(req: NextRequest) {
 
     if (appId && restApiKey) {
       let calleePlayerId: string | null = null;
+      let calleeFcmToken: string | null = null;
       try {
         const { data: notifData } = await supabaseAdmin
           .from('notifications')
-          .select('onesignal_player_id')
+          .select('onesignal_player_id, fcm_token')
           .eq('user_id', calleeId)
           .maybeSingle();
         calleePlayerId = notifData?.onesignal_player_id || null;
+        calleeFcmToken = notifData?.fcm_token || null;
       } catch (dbErr) {
-        console.warn('Could not query player ID from database:', dbErr);
+        console.warn('Could not query player ID / FCM token from database:', dbErr);
       }
 
       const directPayload: Record<string, any> = {
         app_id: appId,
         headings: { en: notifTitle },
         contents: { en: notifMessage },
-        data: callData,
+        data: {
+          ...callData,
+          type: 'incoming_call',
+          notification_type: 'incoming_call',
+        },
         content_available: true,
         android_sound: 'ringtone',
         ios_sound: 'ringtone.mp3',
         priority: 10,
-        buttons: [
-          { id: 'accept', text: 'Answer' },
-          { id: 'decline', text: 'Decline' },
-        ],
       };
 
-      if (process.env.ONESIGNAL_CALL_CHANNEL_ID) {
-        directPayload.android_channel_id = process.env.ONESIGNAL_CALL_CHANNEL_ID;
+      if (process.env.ONESIGNAL_CALL_CHANNEL_ID && process.env.ONESIGNAL_CALL_CHANNEL_ID.trim().length > 0) {
+        directPayload.android_channel_id = process.env.ONESIGNAL_CALL_CHANNEL_ID.trim();
       }
 
       if (callerAvatar) {
