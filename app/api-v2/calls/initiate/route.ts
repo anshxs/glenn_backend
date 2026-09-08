@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { createLiveKitToken, getLiveKitConfig } from '@/lib/livekit';
+import { createAgoraToken, getAgoraConfig, uuidToNumericUid } from '@/lib/agora';
 import { supabaseAdmin } from '@/lib/supabase';
 
 export async function POST(req: NextRequest) {
@@ -18,7 +19,7 @@ export async function POST(req: NextRequest) {
     const callId = crypto.randomUUID();
     const roomName = `call_${callId}`;
 
-    // 1. Generate LiveKit Tokens for caller & callee
+    // 1. Generate LiveKit Tokens for caller & callee (Always generated as reliable fallback)
     const callerToken = await createLiveKitToken({
       identity: callerId,
       name: callerName,
@@ -36,7 +37,33 @@ export async function POST(req: NextRequest) {
       canPublishData: true,
     });
 
-    // 2. Insert record into call_logs table
+    // 2. Generate Agora RTC Tokens for caller & callee if Agora is configured
+    const agoraConfig = getAgoraConfig();
+    let agoraAppId: string | null = null;
+    let agoraChannelName: string | null = null;
+    let callerAgoraToken: string | null = null;
+    let calleeAgoraToken: string | null = null;
+    let callerAgoraUid: number | null = null;
+    let calleeAgoraUid: number | null = null;
+
+    if (agoraConfig) {
+      agoraAppId = agoraConfig.appId;
+      agoraChannelName = roomName;
+      callerAgoraUid = uuidToNumericUid(callerId);
+      calleeAgoraUid = uuidToNumericUid(calleeId);
+
+      callerAgoraToken = createAgoraToken({
+        channelName: agoraChannelName,
+        uid: callerAgoraUid,
+      });
+
+      calleeAgoraToken = createAgoraToken({
+        channelName: agoraChannelName,
+        uid: calleeAgoraUid,
+      });
+    }
+
+    // 3. Insert record into call_logs table
     try {
       await supabaseAdmin.from('call_logs').insert({
         call_id: callId,
@@ -50,7 +77,7 @@ export async function POST(req: NextRequest) {
       console.warn('Could not insert call_log record:', logErr);
     }
 
-    // 3. Prepare call notification metadata
+    // 4. Prepare call notification metadata (Includes Agora + LiveKit fallback)
     const notifTitle = callType === 'video' ? 'Incoming Video Call' : 'Incoming Audio Call';
     const notifMessage = `${callerName} is calling...`;
     const callData = {
@@ -66,6 +93,10 @@ export async function POST(req: NextRequest) {
       room_name: roomName,
       token: calleeToken,
       livekit_url: livekitUrl,
+      agora_app_id: agoraAppId || '',
+      agora_channel_name: agoraChannelName || '',
+      agora_token: calleeAgoraToken || '',
+      agora_uid: calleeAgoraUid || 0,
       screen: 'call',
     };
 
@@ -203,6 +234,12 @@ export async function POST(req: NextRequest) {
       token: callerToken,
       calleeToken,
       livekitUrl,
+      agoraAppId,
+      agoraChannelName,
+      callerAgoraToken,
+      calleeAgoraToken,
+      callerAgoraUid,
+      calleeAgoraUid,
     });
   } catch (error: any) {
     console.error('Error initiating call:', error);
