@@ -188,45 +188,16 @@ export async function POST(req: NextRequest) {
         directPayload.large_icon = callerAvatar;
       }
 
-      // Attempt 1: Target via external_id (links directly to Supabase User UUID across all devices)
-      let delivered = false;
-      const aliasPayload = {
-        ...directPayload,
-        include_aliases: { external_id: [calleeId] },
-        target_channel: 'push',
-      };
+      // Prioritize direct player_id if available, fallback to external_id alias
+      const playerIds = calleePlayerId ? [calleePlayerId] : [];
 
-      try {
-        const osRes = await fetch('https://onesignal.com/api/v1/notifications', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Authorization: `Basic ${restApiKey}`,
-          },
-          body: JSON.stringify(aliasPayload),
-        });
-
-        const resData = await osRes.json().catch(() => ({}));
-        if (osRes.ok && (resData?.recipients === undefined || resData.recipients > 0)) {
-          console.log('Incoming call notification delivered via external_id:', resData.id);
-          delivered = true;
-        } else {
-          console.warn('OneSignal external_id dispatch returned 0 recipients or errors:', resData);
-        }
-      } catch (pushErr) {
-        console.warn('Error dispatching via external_id:', pushErr);
-      }
-
-      // Attempt 2 (Fallback): If external_id delivered 0 recipients and we have a cached player_id
-      if (!delivered && calleePlayerId) {
-        console.log('Attempting fallback push via include_player_ids:', calleePlayerId);
-        const playerPayload = {
-          ...directPayload,
-          include_player_ids: [calleePlayerId],
-        };
-
+      if (playerIds.length > 0) {
         try {
-          const osRes2 = await fetch('https://onesignal.com/api/v1/notifications', {
+          const playerPayload = {
+            ...directPayload,
+            include_player_ids: playerIds,
+          };
+          const osRes = await fetch('https://onesignal.com/api/v1/notifications', {
             method: 'POST',
             headers: {
               'Content-Type': 'application/json',
@@ -234,16 +205,32 @@ export async function POST(req: NextRequest) {
             },
             body: JSON.stringify(playerPayload),
           });
-          const resData2 = await osRes2.json().catch(() => ({}));
-          if (osRes2.ok) {
-            console.log('Incoming call notification delivered via player_id fallback:', resData2.id);
-            delivered = true;
-          } else {
-            console.warn('OneSignal player_id fallback dispatch failed:', resData2);
-          }
-        } catch (pushErr2) {
-          console.warn('Error in player_id fallback dispatch:', pushErr2);
+          const resData = await osRes.json().catch(() => ({}));
+          console.log('Call push notification delivered via player_id:', resData?.id, 'recipients:', resData?.recipients);
+        } catch (pushErr) {
+          console.warn('Error dispatching push via player_id:', pushErr);
         }
+      }
+
+      // Also send via external_id alias to reach all logged-in devices of user
+      try {
+        const aliasPayload = {
+          ...directPayload,
+          include_aliases: { external_id: [calleeId] },
+          target_channel: 'push',
+        };
+        const osRes2 = await fetch('https://onesignal.com/api/v1/notifications', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Basic ${restApiKey}`,
+          },
+          body: JSON.stringify(aliasPayload),
+        });
+        const resData2 = await osRes2.json().catch(() => ({}));
+        console.log('Call push notification delivered via external_id:', resData2?.id, 'recipients:', resData2?.recipients);
+      } catch (pushErr2) {
+        console.warn('Error dispatching push via external_id:', pushErr2);
       }
     }
 
