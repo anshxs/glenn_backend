@@ -128,6 +128,19 @@ export async function POST(req: NextRequest) {
       console.warn('Error inserting into user_notifications:', dbErr);
     }
 
+    // 4b. Realtime direct broadcast to callee's active app sessions
+    try {
+      const realtimeChannel = supabaseAdmin.channel(`user_calls_${calleeId}`);
+      await realtimeChannel.send({
+        type: 'broadcast',
+        event: 'incoming_call',
+        payload: callData,
+      });
+      supabaseAdmin.removeChannel(realtimeChannel);
+    } catch (realtimeErr) {
+      console.warn('Realtime call broadcast error:', realtimeErr);
+    }
+
     // 5. Send EXACTLY ONE high-priority call notification via OneSignal
     const appId = process.env.ONESIGNAL_APP_ID;
     const restApiKey = process.env.ONESIGNAL_REST_API_KEY;
@@ -147,7 +160,7 @@ export async function POST(req: NextRequest) {
         console.warn('Could not query player ID / FCM token from database:', dbErr);
       }
 
-      const directPayload: Record<string, any> = {
+      const directPayload: Record<string, unknown> = {
         app_id: appId,
         headings: { en: notifTitle },
         contents: { en: notifMessage },
@@ -157,14 +170,19 @@ export async function POST(req: NextRequest) {
           notification_type: 'incoming_call',
         },
         content_available: true,
+        android_channel_id:
+          process.env.ONESIGNAL_CALL_CHANNEL_ID &&
+          process.env.ONESIGNAL_CALL_CHANNEL_ID.trim().length > 0
+            ? process.env.ONESIGNAL_CALL_CHANNEL_ID.trim()
+            : 'incoming_calls',
         android_sound: 'ringtone',
         ios_sound: 'ringtone.mp3',
         priority: 10,
+        buttons: [
+          { id: 'accept', text: 'Answer' },
+          { id: 'decline', text: 'Decline' },
+        ],
       };
-
-      if (process.env.ONESIGNAL_CALL_CHANNEL_ID && process.env.ONESIGNAL_CALL_CHANNEL_ID.trim().length > 0) {
-        directPayload.android_channel_id = process.env.ONESIGNAL_CALL_CHANNEL_ID.trim();
-      }
 
       if (callerAvatar) {
         directPayload.large_icon = callerAvatar;
@@ -243,10 +261,11 @@ export async function POST(req: NextRequest) {
       callerAgoraUid,
       calleeAgoraUid,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error initiating call:', error);
+    const message = error instanceof Error ? error.message : 'Failed to initiate call';
     return NextResponse.json(
-      { error: error?.message || 'Failed to initiate call' },
+      { error: message },
       { status: 500 }
     );
   }

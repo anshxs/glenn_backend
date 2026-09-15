@@ -23,7 +23,7 @@ export async function POST(req: NextRequest) {
 
     // 1. Update call_logs table in Supabase
     try {
-      const updateData: Record<string, any> = { status: resolvedStatus };
+      const updateData: Record<string, unknown> = { status: resolvedStatus };
       if (
         resolvedStatus === 'ended' ||
         resolvedStatus === 'declined' ||
@@ -84,10 +84,11 @@ export async function POST(req: NextRequest) {
       callId,
       action,
     });
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error('Error responding to call:', error);
+    const message = error instanceof Error ? error.message : 'Failed to update call status';
     return NextResponse.json(
-      { error: error?.message || 'Failed to update call status' },
+      { error: message },
       { status: 500 }
     );
   }
